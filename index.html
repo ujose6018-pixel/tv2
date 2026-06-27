@@ -846,6 +846,12 @@
       stream1Select.addEventListener('change', checkInputs);
       stream2Select.addEventListener('change', checkInputs);
 
+      // ── Dual Sound state (declared here to avoid TDZ when loadViewer is called) ──
+      const _sp = {}; // { [index]: { type, player?, video?, playerReady? } }
+      let _ytReady = false, _ytQ = [];
+      let _twReady = false, _twQ = [];
+      let _hlsReady = false, _hlsQ = [];
+
       // 1. Detectar modo (Admin, Visor o Expirado)
       const params = new URLSearchParams(window.location.search);
       const s1 = params.get('s1');
@@ -910,10 +916,7 @@
         return 'iframe-other';
       }
 
-      const _sp = {}; // streamPlayers: { [index]: { type, player?, video?, playerReady? } }
-
       // ── YouTube API loader (once) ──
-      let _ytReady = false, _ytQ = [];
       function _ensureYT(cb) {
         if (_ytReady) { cb(); return; }
         _ytQ.push(cb);
@@ -927,7 +930,6 @@
       }
 
       // ── Twitch API loader (once) ──
-      let _twReady = false, _twQ = [];
       function _ensureTwitch(cb) {
         if (_twReady) { cb(); return; }
         _twQ.push(cb);
@@ -941,7 +943,6 @@
       }
 
       // ── HLS.js loader (once) ──
-      let _hlsReady = false, _hlsQ = [];
       function _ensureHLS(cb) {
         if (_hlsReady) { cb(); return; }
         _hlsQ.push(cb);
@@ -963,8 +964,15 @@
           e.player.setMuted(muted);
         } else if (e.type === 'direct' && e.video) {
           e.video.muted = muted;
+        } else if (e.type === 'iframe-other' && e.iframe && e.originalUrl) {
+          // Best-effort: reload iframe with mute=1 when muting, restore clean URL when unmuting
+          if (muted) {
+            const sep = e.originalUrl.includes('?') ? '&' : '?';
+            e.iframe.src = e.originalUrl + sep + 'mute=1&muted=true';
+          } else {
+            e.iframe.src = e.originalUrl;
+          }
         }
-        // iframe-other: no reliable API — user controls via provider's UI
       }
 
       // ── updateDualSound: reads both checkboxes, applies mute state ──
@@ -1093,17 +1101,17 @@
             }
 
           } else {
-            // iframe-other: recreate with common mute params when muted
-            let embedUrl = url;
-            if (!isActive) embedUrl += (embedUrl.includes('?') ? '&' : '?') + 'mute=1&muted=true&autoplay=1';
+            // iframe-other: load URL clean (no param injection — breaks .php pages).
+            // On mute toggle we reload with mute=1 appended; on unmute we restore clean URL.
             const iframe = document.createElement('iframe');
             iframe.id = `stream-iframe-${index}`;
-            iframe.src = embedUrl;
+            iframe.src = url;
             iframe.className = 'absolute top-0 left-0 w-full h-full';
             iframe.frameBorder = '0';
-            iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+            iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
             iframe.allowFullscreen = true;
             _sp[index].iframe = iframe;
+            _sp[index].originalUrl = url;
             div.appendChild(iframe);
           }
 
