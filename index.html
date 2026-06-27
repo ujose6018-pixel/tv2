@@ -846,11 +846,416 @@
       stream1Select.addEventListener('change', checkInputs);
       stream2Select.addEventListener('change', checkInputs);
 
-      // ── Dual Sound state (declared here to avoid TDZ when loadViewer is called) ──
-      const _sp = {}; // { [index]: { type, player?, video?, playerReady? } }
+      // ─── DUAL SOUND SYSTEM ──────────────────────────────────────────────────────
+      // localStorage key: stream-${index}-dualsound  ("true"=audio on / "false"=muted)
+      // Default without localStorage: index 0 → audio on, index 1 → muted
+
+      // State (declared before any call site to avoid TDZ)
+      const _sp = {}; // { [idx]: { type, player?, video?, iframe?, originalUrl?, playerReady? } }
       let _ytReady = false, _ytQ = [];
       let _twReady = false, _twQ = [];
       let _hlsReady = false, _hlsQ = [];
+
+      function detectStreamType(url) {
+        if (/youtube\.com|youtube-nocookie\.com|youtu\.be/.test(url)) return 'youtube';
+        if (/twitch\.tv/.test(url)) return 'twitch';
+        if (/\.(m3u8|m3u|mp4|ts|webm)(\?|$)/i.test(url)) return 'direct';
+        return 'iframe-other';
+      }
+
+      function _ensureYT(cb) {
+        if (_ytReady) { cb(); return; }
+        _ytQ.push(cb);
+        if (!window._ytLoading) {
+          window._ytLoading = true;
+          window.onYouTubeIframeAPIReady = () => { _ytReady = true; _ytQ.forEach(f => f()); _ytQ = []; };
+          const s = document.createElement('script');
+          s.src = 'https://www.youtube.com/iframe_api'; s.async = true;
+          document.head.appendChild(s);
+        }
+      }
+
+      function _ensureTwitch(cb) {
+        if (_twReady) { cb(); return; }
+        _twQ.push(cb);
+        if (!window._twLoading) {
+          window._twLoading = true;
+          const s = document.createElement('script');
+          s.src = 'https://player.twitch.tv/js/embed/v1.js'; s.async = true;
+          s.onload = () => { _twReady = true; _twQ.forEach(f => f()); _twQ = []; };
+          document.head.appendChild(s);
+        }
+      }
+
+      function _ensureHLS(cb) {
+        if (_hlsReady) { cb(); return; }
+        _hlsQ.push(cb);
+        if (!window._hlsLoading) {
+          window._hlsLoading = true;
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js'; s.async = true;
+          s.onload = () => { _hlsReady = true; _hlsQ.forEach(f => f()); _hlsQ = []; };
+          document.head.appendChild(s);
+        }
+      }
+
+      function _applyMute(index, muted) {
+        const e = _sp[index]; if (!e) return;
+        if (e.type === 'youtube' && e.player && e.playerReady) {
+          muted ? e.player.mute() : e.player.unMute();
+        } else if (e.type === 'twitch' && e.player) {
+          e.player.setMuted(muted);
+        } else if (e.type === 'direct' && e.video) {
+          e.video.muted = muted;
+        } else if (e.type === 'iframe-other' && e.iframe && e.originalUrl) {
+          if (muted) {
+            const sep = e.originalUrl.includes('?') ? '&' : '?';
+            e.iframe.src = e.originalUrl + sep + 'mute=1&muted=true';
+          } else {
+            e.iframe.src = e.originalUrl;
+          }
+        }
+      }
+
+      function updateDualSound() {
+        Object.keys(_sp).forEach(idx => {
+          const cbEl = document.getElementById(`audio-cb-${idx}`);
+          if (cbEl) _applyMute(parseInt(idx), !cbEl.checked);
+        });
+      }
+
+      function _updatePill(pill, iconSpan, active) {
+        if (active) {
+          pill.style.background = 'rgba(16,185,129,0.88)';
+          pill.style.boxShadow = '0 0 22px rgba(16,185,129,0.45), 0 8px 32px rgba(0,0,0,0.5)';
+          iconSpan.textContent = '🔊';
+        } else {
+          pill.style.background = 'rgba(0,0,0,0.82)';
+          pill.style.boxShadow = '0 8px 32px rgba(0,0,0,0.55)';
+          iconSpan.textContent = '🔇';
+        }
+      }
+
+      // ── Stream extractor via CORS proxies ────────────────────────────────────
+      // Tries to fetch an iframe/embed page and regex-hunt for a real media URL.
+      // Returns the URL string, or null if none found / all proxies fail.
+      const _CORS_PROXIES = [
+        u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+        u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+        u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+      ];
+      // Patterns ordered from most specific to least
+      const _MEDIA_PATTERNS = [
+        /["'`](https?:\/\/[^"'`\s<>]{8,}?\.m3u8[^"'`\s<>]*?)["'`]/gi,
+        /["'`](https?:\/\/[^"'`\s<>]{8,}?\.mp4[^"'`\s<>]*?)["'`]/gi,
+        /["'`](https?:\/\/[^"'`\s<>]{8,}?\.ts[^"'`\s<>]*?)["'`]/gi,
+        /["'`](https?:\/\/[^"'`\s<>]{8,}?\.webm[^"'`\s<>]*?)["'`]/gi,
+        /(?:file|src|source|hls|stream|hlsUrl|hls_url|streamUrl|manifestUrl)\s*[=:]\s*["'`](https?:\/\/[^"'`\s<>]{8,})["'`]/gi,
+        /(?:url|path)\s*[=:]\s*["'`](https?:\/\/[^"'`\s<>]{8,}(?:m3u8|mp4|ts|stream)[^"'`\s<>]*)["'`]/gi,
+      ];
+
+      async function extractStreamUrl(pageUrl) {
+        for (const makeProxy of _CORS_PROXIES) {
+          try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 9000);
+            const res = await fetch(makeProxy(pageUrl), { signal: ctrl.signal });
+            clearTimeout(timer);
+            if (!res.ok) continue;
+            const html = await res.text();
+            for (const pat of _MEDIA_PATTERNS) {
+              pat.lastIndex = 0;
+              let m;
+              while ((m = pat.exec(html)) !== null) {
+                const found = m[1];
+                if (/\.(m3u8|mp4|ts|webm)/i.test(found) || /m3u8/i.test(found)) return found;
+              }
+            }
+          } catch (_) { /* try next proxy */ }
+        }
+        return null;
+      }
+
+      // ── Open stream in VLC via .m3u playlist download ──────────────────────
+      function openInVLC(streamUrl, label) {
+        const m3u = `#EXTM3U\n#EXTINF:-1,${label || 'Stream'}\n${streamUrl}`;
+        const blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'stream.m3u';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      }
+
+      // ── Upgrade iframe-other to native video in-place ──────────────────────
+      function _mountNativeVideo(index, streamUrl, div) {
+        const oldIframe = div.querySelector('iframe');
+        if (oldIframe) oldIframe.remove();
+
+        const isHLS = /\.m3u8?(\?|$)/i.test(streamUrl) || /m3u8/i.test(streamUrl);
+        const video = document.createElement('video');
+        video.className = 'absolute top-0 left-0 w-full h-full';
+        video.autoplay = true;
+        video.setAttribute('playsinline', '');
+        video.controls = false;
+        const cbEl = document.getElementById(`audio-cb-${index}`);
+        video.muted = cbEl ? !cbEl.checked : true;
+
+        // Insert before overlay controls (first child = media, rest = overlays)
+        div.insertBefore(video, div.firstChild);
+
+        _sp[index].type = 'direct';
+        _sp[index].video = video;
+        _sp[index].extractedUrl = streamUrl;
+        delete _sp[index].iframe;
+
+        if (isHLS) {
+          _ensureHLS(() => {
+            if (Hls.isSupported()) {
+              const hls = new Hls();
+              hls.loadSource(streamUrl);
+              hls.attachMedia(video);
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+              video.src = streamUrl;
+            }
+          });
+        } else {
+          video.src = streamUrl;
+        }
+      }
+
+      // ── Shared overlay pill style ───────────────────────────────────────────
+      function _overlayPill(cssExtra) {
+        const el = document.createElement('button');
+        el.style.cssText = [
+          'display:flex;align-items:center;gap:6px;',
+          'padding:8px 14px;border-radius:0.9rem;border:1.5px solid rgba(255,255,255,0.12);',
+          'backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);',
+          'color:#fff;font-size:0.72rem;font-weight:700;letter-spacing:0.03em;',
+          'cursor:pointer;transition:background 0.2s,transform 0.15s;background:rgba(0,0,0,0.80);',
+          'box-shadow:0 4px 24px rgba(0,0,0,0.5);',
+          cssExtra || ''
+        ].join('');
+        el.onmouseenter = () => { el.style.transform = 'scale(1.05)'; };
+        el.onmouseleave = () => { el.style.transform = 'scale(1)'; };
+        return el;
+      }
+
+      function loadViewer(streams) {
+        viewerView.classList.remove('hidden');
+        viewerView.classList.add('flex');
+
+        const isSplit = streams.length === 2;
+        const forced = streams.length === 1;
+
+        streams.forEach((url, index) => {
+          const type = detectStreamType(url);
+          _sp[index] = { type };
+
+          const saved = localStorage.getItem(`stream-${index}-dualsound`);
+          const isActive = forced ? true : (saved !== null ? saved === 'true' : index === 0);
+
+          const div = document.createElement('div');
+          div.className = `relative ${isSplit
+            ? 'w-full md:w-1/2 h-1/2 md:h-full border-b md:border-b-0 md:border-r border-slate-800'
+            : 'w-full h-full'}`;
+
+          if (type === 'youtube') {
+            let embedUrl = url
+              .replace(/youtube\.com\/watch\?v=([^&]+)/, 'youtube.com/embed/$1')
+              .replace(/youtu\.be\/([^?]+)/, 'youtube.com/embed/$1')
+              .replace(/youtube-nocookie\.com\/watch\?v=([^&]+)/, 'youtube-nocookie.com/embed/$1');
+            const origin = encodeURIComponent(window.location.origin);
+            embedUrl += (embedUrl.includes('?') ? '&' : '?') + `enablejsapi=1&origin=${origin}`;
+            const iframe = document.createElement('iframe');
+            iframe.id = `stream-iframe-${index}`;
+            iframe.src = embedUrl;
+            iframe.className = 'absolute top-0 left-0 w-full h-full';
+            iframe.frameBorder = '0';
+            iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+            iframe.allowFullscreen = true;
+            div.appendChild(iframe);
+            _ensureYT(() => {
+              const player = new YT.Player(`stream-iframe-${index}`, {
+                events: { onReady: () => {
+                  _sp[index].playerReady = true;
+                  _applyMute(index, !document.getElementById(`audio-cb-${index}`)?.checked);
+                }}
+              });
+              _sp[index].player = player;
+            });
+
+          } else if (type === 'twitch') {
+            const cId = `twitch-container-${index}`;
+            const cDiv = document.createElement('div');
+            cDiv.id = cId;
+            cDiv.className = 'absolute top-0 left-0 w-full h-full';
+            div.appendChild(cDiv);
+            const tOpts = { width: '100%', height: '100%', muted: !isActive, parent: [window.location.hostname] };
+            try {
+              const u = new URL(url.startsWith('http') ? url : 'https://' + url);
+              const vP = u.searchParams.get('video'), chP = u.searchParams.get('channel');
+              const pp = u.pathname.split('/').filter(Boolean);
+              if (vP) tOpts.video = vP;
+              else if (chP) tOpts.channel = chP;
+              else if (pp[0] === 'videos' && pp[1]) tOpts.video = pp[1];
+              else if (pp[0]) tOpts.channel = pp[0];
+            } catch (_) {}
+            _ensureTwitch(() => {
+              const player = new Twitch.Player(cId, tOpts);
+              _sp[index].player = player;
+              player.addEventListener(Twitch.Player.READY, () => updateDualSound());
+            });
+
+          } else if (type === 'direct') {
+            const isHLS = /\.m3u8?(\?|$)/i.test(url);
+            const video = document.createElement('video');
+            video.className = 'absolute top-0 left-0 w-full h-full';
+            video.autoplay = true;
+            video.setAttribute('playsinline', '');
+            video.controls = false;
+            video.muted = !isActive;
+            _sp[index].video = video;
+            div.appendChild(video);
+            if (isHLS) {
+              _ensureHLS(() => {
+                if (Hls.isSupported()) {
+                  const hls = new Hls();
+                  hls.loadSource(url);
+                  hls.attachMedia(video);
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                  video.src = url;
+                }
+              });
+            } else {
+              video.src = url;
+            }
+
+          } else {
+            // iframe-other: load clean (no param injection — breaks .php pages)
+            const iframe = document.createElement('iframe');
+            iframe.id = `stream-iframe-${index}`;
+            iframe.src = url;
+            iframe.className = 'absolute top-0 left-0 w-full h-full';
+            iframe.frameBorder = '0';
+            iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+            iframe.allowFullscreen = true;
+            _sp[index].iframe = iframe;
+            _sp[index].originalUrl = url;
+            div.appendChild(iframe);
+
+            // ── Extraction overlay (bottom-left) ──
+            const extractBar = document.createElement('div');
+            extractBar.style.cssText = 'position:absolute;bottom:20px;left:20px;z-index:40;display:flex;gap:8px;flex-wrap:wrap;max-width:60%;';
+
+            const extractBtn = _overlayPill();
+            extractBtn.innerHTML = '<span style="font-size:1rem">🔍</span><span>Analizando...</span>';
+            extractBtn.disabled = true;
+            extractBar.appendChild(extractBtn);
+
+            const vlcBtn = _overlayPill();
+            vlcBtn.innerHTML = '<span style="font-size:1rem">📺</span><span>VLC</span>';
+            vlcBtn.title = 'Abrir en VLC / descargar playlist';
+            vlcBtn.style.display = 'none';
+            vlcBtn.addEventListener('click', () => {
+              const target = _sp[index].extractedUrl || url;
+              openInVLC(target, `Stream ${index + 1}`);
+            });
+            extractBar.appendChild(vlcBtn);
+
+            div.appendChild(extractBar);
+
+            // Auto-extraction in background
+            extractStreamUrl(url).then(found => {
+              if (found) {
+                _sp[index].extractedUrl = found;
+                extractBtn.disabled = false;
+                extractBtn.innerHTML = '<span style="font-size:1rem">⬆️</span><span>Activar nativo</span>';
+                extractBtn.style.background = 'rgba(16,185,129,0.85)';
+                extractBtn.style.boxShadow = '0 0 18px rgba(16,185,129,0.4)';
+                extractBtn.title = found;
+                extractBtn.addEventListener('click', () => {
+                  _mountNativeVideo(index, found, div);
+                  extractBtn.innerHTML = '<span style="font-size:1rem">✅</span><span>Nativo</span>';
+                  extractBtn.disabled = true;
+                  extractBtn.style.background = 'rgba(16,185,129,0.5)';
+                });
+                vlcBtn.style.display = 'flex';
+              } else {
+                extractBtn.innerHTML = '<span style="font-size:1rem">⚠️</span><span>Sin stream directo</span>';
+                extractBtn.style.opacity = '0.5';
+                extractBtn.title = 'No se encontró URL de stream en la página';
+                setTimeout(() => { extractBar.style.opacity = '0'; }, 4000);
+              }
+            });
+          }
+
+          // ── Bottom-left: VLC button for native/youtube/twitch ──
+          // (iframe-other has its own extractBar above; this handles the other types)
+          if (type !== 'iframe-other') {
+            const vlcBarNative = document.createElement('div');
+            vlcBarNative.style.cssText = 'position:absolute;bottom:20px;left:20px;z-index:40;';
+            const vlcNativeBtn = _overlayPill();
+            vlcNativeBtn.innerHTML = '<span style="font-size:1rem">📺</span><span>VLC</span>';
+            vlcNativeBtn.title = 'Descargar playlist .m3u para abrir en VLC';
+            vlcNativeBtn.addEventListener('click', () => {
+              const target = _sp[index].extractedUrl || url;
+              openInVLC(target, `Stream ${index + 1}`);
+            });
+            vlcBarNative.appendChild(vlcNativeBtn);
+            div.appendChild(vlcBarNative);
+          }
+
+          // ── Dual Sound pill (bottom-right) ──
+          const audioBtn = document.createElement('label');
+          audioBtn.id = `audio-btn-${index}`;
+          audioBtn.className = 'absolute bottom-5 right-5 z-40 flex items-center cursor-pointer select-none';
+          if (forced) audioBtn.style.cursor = 'default';
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.id = `audio-cb-${index}`;
+          cb.checked = isActive;
+          cb.disabled = forced;
+          cb.className = 'sr-only';
+
+          const pill = document.createElement('div');
+          pill.style.cssText = 'backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:1rem;padding:10px 16px;display:flex;align-items:center;gap:8px;transition:background 0.25s,box-shadow 0.25s;border:1.5px solid rgba(255,255,255,0.10);';
+
+          const iconSpan = document.createElement('span');
+          iconSpan.style.cssText = 'font-size:1.35rem;line-height:1;';
+
+          const labelSpan = document.createElement('span');
+          labelSpan.style.cssText = 'font-size:0.72rem;font-weight:700;color:#fff;letter-spacing:0.03em;' +
+            (window.matchMedia('(min-width:640px)').matches ? '' : 'display:none;');
+          labelSpan.textContent = `Sonido ${index + 1}`;
+
+          _updatePill(pill, iconSpan, isActive);
+          pill.appendChild(iconSpan);
+          pill.appendChild(labelSpan);
+
+          if (type === 'iframe-other') {
+            const warn = document.createElement('span');
+            warn.title = 'El control de audio depende del proveedor';
+            warn.style.cssText = 'font-size:0.85rem;line-height:1;opacity:0.85;margin-left:2px;';
+            warn.textContent = '⚠️';
+            pill.appendChild(warn);
+          }
+
+          cb.addEventListener('change', () => {
+            if (!forced) localStorage.setItem(`stream-${index}-dualsound`, cb.checked);
+            _updatePill(pill, iconSpan, cb.checked);
+            _applyMute(index, !cb.checked);
+          });
+
+          audioBtn.appendChild(cb);
+          audioBtn.appendChild(pill);
+          div.appendChild(audioBtn);
+          videoContainer.appendChild(div);
+        });
+      }
 
       // 1. Detectar modo (Admin, Visor o Expirado)
       const params = new URLSearchParams(window.location.search);
@@ -903,268 +1308,6 @@
         loadViewer(streams);
       } else {
         adminView.classList.remove('hidden');
-      }
-
-      // ─── DUAL SOUND SYSTEM ──────────────────────────────────────────────────────
-      // localStorage key: stream-${index}-dualsound  ("true"=sound on / "false"=muted)
-      // Default: index 0 → sound on, index 1 → muted
-
-      function detectStreamType(url) {
-        if (/youtube\.com|youtube-nocookie\.com|youtu\.be/.test(url)) return 'youtube';
-        if (/twitch\.tv/.test(url)) return 'twitch';
-        if (/\.(m3u8|m3u|mp4|ts|webm)(\?|$)/i.test(url)) return 'direct';
-        return 'iframe-other';
-      }
-
-      // ── YouTube API loader (once) ──
-      function _ensureYT(cb) {
-        if (_ytReady) { cb(); return; }
-        _ytQ.push(cb);
-        if (!window._ytLoading) {
-          window._ytLoading = true;
-          window.onYouTubeIframeAPIReady = () => { _ytReady = true; _ytQ.forEach(f => f()); _ytQ = []; };
-          const s = document.createElement('script');
-          s.src = 'https://www.youtube.com/iframe_api'; s.async = true;
-          document.head.appendChild(s);
-        }
-      }
-
-      // ── Twitch API loader (once) ──
-      function _ensureTwitch(cb) {
-        if (_twReady) { cb(); return; }
-        _twQ.push(cb);
-        if (!window._twLoading) {
-          window._twLoading = true;
-          const s = document.createElement('script');
-          s.src = 'https://player.twitch.tv/js/embed/v1.js'; s.async = true;
-          s.onload = () => { _twReady = true; _twQ.forEach(f => f()); _twQ = []; };
-          document.head.appendChild(s);
-        }
-      }
-
-      // ── HLS.js loader (once) ──
-      function _ensureHLS(cb) {
-        if (_hlsReady) { cb(); return; }
-        _hlsQ.push(cb);
-        if (!window._hlsLoading) {
-          window._hlsLoading = true;
-          const s = document.createElement('script');
-          s.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js'; s.async = true;
-          s.onload = () => { _hlsReady = true; _hlsQ.forEach(f => f()); _hlsQ = []; };
-          document.head.appendChild(s);
-        }
-      }
-
-      // ── Apply mute/unmute to a single stream ──
-      function _applyMute(index, muted) {
-        const e = _sp[index]; if (!e) return;
-        if (e.type === 'youtube' && e.player && e.playerReady) {
-          muted ? e.player.mute() : e.player.unMute();
-        } else if (e.type === 'twitch' && e.player) {
-          e.player.setMuted(muted);
-        } else if (e.type === 'direct' && e.video) {
-          e.video.muted = muted;
-        } else if (e.type === 'iframe-other' && e.iframe && e.originalUrl) {
-          // Best-effort: reload iframe with mute=1 when muting, restore clean URL when unmuting
-          if (muted) {
-            const sep = e.originalUrl.includes('?') ? '&' : '?';
-            e.iframe.src = e.originalUrl + sep + 'mute=1&muted=true';
-          } else {
-            e.iframe.src = e.originalUrl;
-          }
-        }
-      }
-
-      // ── updateDualSound: reads both checkboxes, applies mute state ──
-      function updateDualSound() {
-        Object.keys(_sp).forEach(idx => {
-          const cb = document.getElementById(`audio-cb-${idx}`);
-          if (cb) _applyMute(parseInt(idx), !cb.checked);
-        });
-      }
-
-      // ── Pill visual updater ──
-      function _updatePill(pill, iconSpan, active) {
-        if (active) {
-          pill.style.background = 'rgba(16,185,129,0.88)';
-          pill.style.boxShadow = '0 0 22px rgba(16,185,129,0.45), 0 8px 32px rgba(0,0,0,0.5)';
-          iconSpan.textContent = '🔊';
-        } else {
-          pill.style.background = 'rgba(0,0,0,0.82)';
-          pill.style.boxShadow = '0 8px 32px rgba(0,0,0,0.55)';
-          iconSpan.textContent = '🔇';
-        }
-      }
-
-      // ── loadViewer ──────────────────────────────────────────────────────────
-      function loadViewer(streams) {
-        viewerView.classList.remove('hidden');
-        viewerView.classList.add('flex');
-
-        const isSplit = streams.length === 2;
-        const forced = streams.length === 1; // single stream: always sound on
-
-        streams.forEach((url, index) => {
-          const type = detectStreamType(url);
-          _sp[index] = { type };
-
-          // Restore from localStorage; default: 0→on, 1→off
-          const saved = localStorage.getItem(`stream-${index}-dualsound`);
-          const isActive = forced ? true : (saved !== null ? saved === 'true' : index === 0);
-
-          // ── Wrapper ──
-          const div = document.createElement('div');
-          div.className = `relative ${isSplit
-            ? 'w-full md:w-1/2 h-1/2 md:h-full border-b md:border-b-0 md:border-r border-slate-800'
-            : 'w-full h-full'}`;
-
-          // ── Media element by type ──
-          if (type === 'youtube') {
-            // Normalise to embed URL
-            let embedUrl = url
-              .replace(/youtube\.com\/watch\?v=([^&]+)/, 'youtube.com/embed/$1')
-              .replace(/youtu\.be\/([^?]+)/, 'youtube.com/embed/$1')
-              .replace(/youtube-nocookie\.com\/watch\?v=([^&]+)/, 'youtube-nocookie.com/embed/$1');
-            const origin = encodeURIComponent(window.location.origin);
-            embedUrl += (embedUrl.includes('?') ? '&' : '?') + `enablejsapi=1&origin=${origin}`;
-
-            const iframe = document.createElement('iframe');
-            iframe.id = `stream-iframe-${index}`;
-            iframe.src = embedUrl;
-            iframe.className = 'absolute top-0 left-0 w-full h-full';
-            iframe.frameBorder = '0';
-            iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
-            iframe.allowFullscreen = true;
-            div.appendChild(iframe);
-
-            _ensureYT(() => {
-              const player = new YT.Player(`stream-iframe-${index}`, {
-                events: {
-                  onReady: () => {
-                    _sp[index].playerReady = true;
-                    _applyMute(index, !document.getElementById(`audio-cb-${index}`)?.checked);
-                  }
-                }
-              });
-              _sp[index].player = player;
-            });
-
-          } else if (type === 'twitch') {
-            const cId = `twitch-container-${index}`;
-            const cDiv = document.createElement('div');
-            cDiv.id = cId;
-            cDiv.className = 'absolute top-0 left-0 w-full h-full';
-            div.appendChild(cDiv);
-
-            // Parse channel or video from URL
-            let tOpts = { width: '100%', height: '100%', muted: !isActive, parent: [window.location.hostname] };
-            try {
-              const u = new URL(url.startsWith('http') ? url : 'https://' + url);
-              const vParam = u.searchParams.get('video');
-              const chParam = u.searchParams.get('channel');
-              const pathParts = u.pathname.split('/').filter(Boolean);
-              if (vParam) tOpts.video = vParam;
-              else if (chParam) tOpts.channel = chParam;
-              else if (pathParts[0] === 'videos' && pathParts[1]) tOpts.video = pathParts[1];
-              else if (pathParts[0]) tOpts.channel = pathParts[0];
-            } catch (_) {}
-
-            _ensureTwitch(() => {
-              const player = new Twitch.Player(cId, tOpts);
-              _sp[index].player = player;
-              player.addEventListener(Twitch.Player.READY, () => updateDualSound());
-            });
-
-          } else if (type === 'direct') {
-            const isHLS = /\.m3u8?(\?|$)/i.test(url);
-            const video = document.createElement('video');
-            video.className = 'absolute top-0 left-0 w-full h-full';
-            video.autoplay = true;
-            video.setAttribute('playsinline', '');
-            video.controls = false;
-            video.muted = !isActive;
-            _sp[index].video = video;
-            div.appendChild(video);
-
-            if (isHLS) {
-              _ensureHLS(() => {
-                if (Hls.isSupported()) {
-                  const hls = new Hls();
-                  hls.loadSource(url);
-                  hls.attachMedia(video);
-                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                  video.src = url; // native HLS (Safari)
-                }
-              });
-            } else {
-              video.src = url;
-            }
-
-          } else {
-            // iframe-other: load URL clean (no param injection — breaks .php pages).
-            // On mute toggle we reload with mute=1 appended; on unmute we restore clean URL.
-            const iframe = document.createElement('iframe');
-            iframe.id = `stream-iframe-${index}`;
-            iframe.src = url;
-            iframe.className = 'absolute top-0 left-0 w-full h-full';
-            iframe.frameBorder = '0';
-            iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
-            iframe.allowFullscreen = true;
-            _sp[index].iframe = iframe;
-            _sp[index].originalUrl = url;
-            div.appendChild(iframe);
-          }
-
-          // ── Dual Sound pill checkbox ──
-          // id="audio-btn-${index}" preserves original id pattern on the wrapper label
-          const audioBtn = document.createElement('label');
-          audioBtn.id = `audio-btn-${index}`;
-          audioBtn.className = 'absolute bottom-5 right-5 z-40 flex items-center gap-0 cursor-pointer select-none';
-          if (forced) audioBtn.style.cursor = 'default';
-
-          const cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.id = `audio-cb-${index}`;
-          cb.checked = isActive;
-          cb.disabled = forced;
-          cb.className = 'sr-only';
-
-          const pill = document.createElement('div');
-          pill.style.cssText = 'backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:1rem;padding:10px 16px;display:flex;align-items:center;gap:8px;transition:background 0.25s,box-shadow 0.25s;border:1.5px solid rgba(255,255,255,0.10);';
-
-          const iconSpan = document.createElement('span');
-          iconSpan.style.cssText = 'font-size:1.35rem;line-height:1;transition:all 0.2s;';
-
-          const labelSpan = document.createElement('span');
-          labelSpan.style.cssText = 'font-size:0.72rem;font-weight:700;color:#fff;letter-spacing:0.03em;display:none;';
-          labelSpan.textContent = `Sonido ${index + 1}`;
-          // Show label on larger screens via matchMedia
-          if (window.matchMedia('(min-width:640px)').matches) labelSpan.style.display = 'inline';
-
-          _updatePill(pill, iconSpan, isActive);
-          pill.appendChild(iconSpan);
-          pill.appendChild(labelSpan);
-
-          // Warning badge for iframe-other
-          if (type === 'iframe-other') {
-            const warn = document.createElement('span');
-            warn.title = 'El control de audio depende del proveedor';
-            warn.style.cssText = 'font-size:0.85rem;line-height:1;opacity:0.85;margin-left:2px;';
-            warn.textContent = '⚠️';
-            pill.appendChild(warn);
-          }
-
-          cb.addEventListener('change', () => {
-            if (!forced) localStorage.setItem(`stream-${index}-dualsound`, cb.checked);
-            _updatePill(pill, iconSpan, cb.checked);
-            _applyMute(index, !cb.checked);
-          });
-
-          audioBtn.appendChild(cb);
-          audioBtn.appendChild(pill);
-          div.appendChild(audioBtn);
-          videoContainer.appendChild(div);
-        });
       }
 
       // Función para resetear el modo de edición
