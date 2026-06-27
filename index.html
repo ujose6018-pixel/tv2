@@ -907,14 +907,8 @@
           e.player.setMuted(muted);
         } else if (e.type === 'direct' && e.video) {
           e.video.muted = muted;
-        } else if (e.type === 'iframe-other' && e.iframe && e.originalUrl) {
-          if (muted) {
-            const sep = e.originalUrl.includes('?') ? '&' : '?';
-            e.iframe.src = e.originalUrl + sep + 'mute=1&muted=true';
-          } else {
-            e.iframe.src = e.originalUrl;
-          }
-        }
+        // iframe-other: no hay API cross-origin; mutar via src causa reload y no funciona
+        // con players como Bitmovin que ignoran esos parámetros GET.
       }
 
       function updateDualSound() {
@@ -1475,7 +1469,20 @@
           if (shouldPlay) e.video.play().catch(() => {});
           else e.video.pause();
         }
-        // iframe-other: sin API cross-origin; queda silenciado por AudioManager
+        } else if (e.type === 'iframe-other' && e.iframe) {
+          if (!shouldPlay) {
+            // Única forma de detener audio cross-origin: vaciar src.
+            // Se guarda la URL para restaurarla al activar el canal.
+            if (e.iframe.src && e.iframe.src !== 'about:blank') {
+              e._savedSrc = e.iframe.src;
+            }
+            e.iframe.src = 'about:blank';
+          } else {
+            // Restaurar URL: el player recarga, pero el audio empieza correctamente.
+            const url = e._savedSrc || e.originalUrl;
+            if (url && e.iframe.src !== url) e.iframe.src = url;
+          }
+        }
       }
 
       // Layout: un solo stream visible, el resto oculto y pausado
