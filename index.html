@@ -1270,7 +1270,7 @@
       let _pipMainIdx = 0;       // stream principal en PiP
       const _CHANNEL_KEY = 'channel-active-idx';
       let _channelIdx = parseInt(localStorage.getItem(_CHANNEL_KEY) || '0') || 0;
-      let _barsShow = null; // función pública para revelar barras desde fuera del closure
+      let _panelOpen = false; // estado del panel lateral de controles
       let _pipFloatIdx = 1;      // stream flotante en PiP
       const _PIP_POS_KEY = 'pip-win-pos';
       const _PIP_AUDIO_KEY = 'pip-only-main-audio';
@@ -1495,43 +1495,8 @@
         _syncModeBar(streams);
       }
 
-      // Barra de chips S1/S2/S3... para modo Canal
-      function _buildChannelBar(streams) {
-        document.getElementById('channel-bar')?.remove();
-
-        const bar = document.createElement('div');
-        bar.id = 'channel-bar';
-        bar.style.cssText = [
-          'position:absolute;top:34px;left:50%;transform:translateX(-50%);z-index:59;',
-          'display:flex;align-items:center;gap:4px;',
-          'padding:3px 6px;border-radius:8px;',
-          'background:rgba(2,6,23,0.48);',
-          'backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);',
-          'border:1px solid rgba(255,255,255,0.06);',
-          'box-shadow:0 2px 10px rgba(0,0,0,0.3);',
-          'white-space:nowrap;',
-          'opacity:0;pointer-events:none;',
-          'transition:opacity 0.3s ease;',
-        ].join('');
-
-        streams.forEach((_, i) => {
-          const btn = document.createElement('button');
-          btn.id = 'ch-btn-' + i;
-          btn.textContent = 'S' + (i + 1);
-          btn.style.cssText = [
-            'padding:3px 9px;border-radius:6px;font-size:0.62rem;font-weight:700;',
-            'border:1px solid rgba(255,255,255,0.09);cursor:pointer;',
-            'transition:background 0.18s,color 0.18s,border-color 0.18s;',
-            i === _channelIdx
-              ? 'background:rgba(16,185,129,0.88);color:#fff;border-color:rgba(16,185,129,0.5);box-shadow:0 0 14px rgba(16,185,129,0.4);'
-              : 'background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.55);',
-          ].join('');
-          btn.addEventListener('click', () => _switchChannel(i, streams));
-          bar.appendChild(btn);
-        });
-
-        viewerView.appendChild(bar);
-      }
+      // _buildChannelBar: chips integrados en el panel lateral; esta función es no-op.
+      function _buildChannelBar(_streams) {}
 
       // ═══════════════════════════════════════════════════════════════════
       //  END CHANNEL MODE
@@ -1610,172 +1575,192 @@
         }
       };
 
-      // ── Sincronizar estado visual de la barra ─────────────────────────
+      // ── Sincronizar estado visual del panel lateral ───────────────────
       function _syncModeBar(streams) {
-        const bar = document.getElementById('pip-mode-bar');
-        if (!bar) return;
-        const splitBtn   = bar.querySelector('#pmb-split');
-        const pipBtn     = bar.querySelector('#pmb-pip');
-        const channelBtn = bar.querySelector('#pmb-channel');
-        const selWrap    = bar.querySelector('#pmb-selectors');
-        const audioSwitch = bar.querySelector('#pmb-audio-switch');
+        const panel = document.getElementById('ctrl-panel');
+        if (!panel) return;
 
-        // Reset todos los botones de modo
-        [splitBtn, pipBtn, channelBtn].forEach(b => {
-          if (!b) return;
-          b.style.background = 'rgba(255,255,255,0.08)';
-          b.style.color = 'rgba(255,255,255,0.55)';
+        // Botones de modo
+        const activeStyle  = 'background:rgba(16,185,129,0.88);color:#fff;';
+        const inactiveStyle = 'background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.5);';
+        ['pmb-split','pmb-pip','pmb-channel'].forEach(id => {
+          const b = document.getElementById(id);
+          if (b) b.style.cssText += inactiveStyle;
         });
+        const activeId = _viewMode === 'split' ? 'pmb-split' : _viewMode === 'pip' ? 'pmb-pip' : 'pmb-channel';
+        const activeBtn = document.getElementById(activeId);
+        if (activeBtn) activeBtn.style.cssText += activeStyle;
 
-        if (_viewMode === 'split') {
-          if (splitBtn) { splitBtn.style.background = 'rgba(16,185,129,0.88)'; splitBtn.style.color = '#fff'; }
-          if (selWrap) selWrap.style.display = 'none';
-          document.getElementById('channel-bar')?.remove();
-        } else if (_viewMode === 'pip') {
-          if (pipBtn) { pipBtn.style.background = 'rgba(16,185,129,0.88)'; pipBtn.style.color = '#fff'; }
-          if (selWrap) selWrap.style.display = 'flex';
-          document.getElementById('channel-bar')?.remove();
-        } else if (_viewMode === 'channel') {
-          if (channelBtn) { channelBtn.style.background = 'rgba(16,185,129,0.88)'; channelBtn.style.color = '#fff'; }
-          if (selWrap) selWrap.style.display = 'none';
-          // Actualizar chips del canal bar si ya existe
-          streams.forEach((_, i) => {
-            const chip = document.getElementById('ch-btn-' + i);
-            if (!chip) return;
-            if (i === _channelIdx) {
-              chip.style.background = 'rgba(16,185,129,0.88)';
-              chip.style.color = '#fff';
-              chip.style.borderColor = 'rgba(16,185,129,0.5)';
-              chip.style.boxShadow = '0 0 14px rgba(16,185,129,0.4)';
-            } else {
-              chip.style.background = 'rgba(255,255,255,0.08)';
-              chip.style.color = 'rgba(255,255,255,0.55)';
-              chip.style.borderColor = 'rgba(255,255,255,0.12)';
-              chip.style.boxShadow = '';
-            }
-          });
-        }
+        // Sección PiP selectors
+        const selWrap = document.getElementById('pmb-selectors');
+        if (selWrap) selWrap.style.display = _viewMode === 'pip' ? 'flex' : 'none';
 
-        // Botón de audio: visible en split/pip, oculto en canal (audio exclusivo forzado)
-        if (audioSwitch) audioSwitch.style.display = _viewMode === 'channel' ? 'none' : 'flex';
+        // Sección canal chips
+        const chSection = document.getElementById('ctrl-channel-chips');
+        if (chSection) chSection.style.display = _viewMode === 'channel' ? 'flex' : 'none';
+
+        // Sección audio: oculta en modo canal (audio exclusivo ya forzado)
+        const audioSec = document.getElementById('pmb-audio-switch');
+        if (audioSec) audioSec.style.display = _viewMode === 'channel' ? 'none' : 'block';
+
+        // Botón audio
         const audioToggle = document.getElementById('pmb-audio-only-main');
         if (audioToggle) {
-          audioToggle.innerHTML = _pipOnlyMainAudio ? '🔇 Solo' : '🔊 Ambos';
-          audioToggle.style.background = _pipOnlyMainAudio ? 'rgba(255,255,255,0.08)' : 'rgba(16,185,129,0.88)';
-          audioToggle.style.color = _pipOnlyMainAudio ? 'rgba(255,255,255,0.55)' : '#fff';
+          audioToggle.innerHTML = _pipOnlyMainAudio ? '🔇 Solo principal' : '🔊 Ambos canales';
+          audioToggle.style.background = _pipOnlyMainAudio ? 'rgba(255,255,255,0.07)' : 'rgba(16,185,129,0.88)';
+          audioToggle.style.color = _pipOnlyMainAudio ? 'rgba(255,255,255,0.5)' : '#fff';
         }
 
-        // Sincronizar radios PiP
+        // Radios PiP
         streams.forEach((_, i) => {
           const rM = document.getElementById('pmb-main-r' + i);
           if (rM) rM.checked = (i === _pipMainIdx);
           const rF = document.getElementById('pmb-float-r' + i);
           if (rF) rF.checked = (i === _pipFloatIdx);
         });
+
+        // Chips de canal
+        streams.forEach((_, i) => {
+          const chip = document.getElementById('ch-btn-' + i);
+          if (!chip) return;
+          if (i === _channelIdx) {
+            chip.style.background = 'rgba(16,185,129,0.88)';
+            chip.style.color = '#fff';
+            chip.style.borderColor = 'rgba(16,185,129,0.45)';
+          } else {
+            chip.style.background = 'rgba(255,255,255,0.07)';
+            chip.style.color = 'rgba(255,255,255,0.5)';
+            chip.style.borderColor = 'rgba(255,255,255,0.08)';
+          }
+        });
       }
 
-      // ── Auto-hide: las barras se desvanecen cuando el cursor se aleja ─
-      function _setupBarVisibility() {
-        let hideTimer = null;
-
-        function show() {
-          clearTimeout(hideTimer);
-          ['pip-mode-bar', 'channel-bar'].forEach(id => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.style.opacity = '1';
-            el.style.pointerEvents = 'auto';
-          });
-          hideTimer = setTimeout(hide, 2600);
-        }
-
-        function hide() {
-          ['pip-mode-bar', 'channel-bar'].forEach(id => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.style.opacity = '0';
-            el.style.pointerEvents = 'none';
-          });
-        }
-
-        _barsShow = show;
-
-        // Revelar al mover el mouse hacia la zona superior
-        viewerView.addEventListener('mousemove', e => {
-          if (e.clientY < 90) show();
-          else { clearTimeout(hideTimer); hideTimer = setTimeout(hide, 2600); }
-        }, { passive: true });
-
-        // Revelar al interactuar con la barra directamente
-        viewerView.addEventListener('mouseover', e => {
-          if (e.target?.closest?.('#pip-mode-bar, #channel-bar')) show();
-        }, { passive: true });
-
-        // Touch: revelar al tocar la zona superior
-        viewerView.addEventListener('touchstart', e => {
-          const t = e.touches?.[0];
-          if (t && t.clientY < 90) show();
-        }, { passive: true });
-
-        // Mostrar al cargar durante 3s
-        show();
-      }
-
-      // ── Barra de modo (Split / PiP + selectores) ──────────────────────
+      // ── Panel lateral de controles + botón toggle ─────────────────────
       function _buildModeSelector(streams) {
+        document.getElementById('ctrl-panel')?.remove();
+        document.getElementById('ctrl-toggle')?.remove();
         document.getElementById('pip-mode-bar')?.remove();
         document.getElementById('pip-extra-list')?.remove();
         if (streams.length < 2) return;
 
-        // Asegurar que _pipFloatIdx sea válido
         if (_pipFloatIdx === _pipMainIdx || _pipFloatIdx >= streams.length) {
           for (let j = 0; j < streams.length; j++) {
             if (j !== _pipMainIdx) { _pipFloatIdx = j; break; }
           }
         }
 
-        const bar = document.createElement('div');
-        bar.id = 'pip-mode-bar';
-        bar.style.cssText = [
-          'position:absolute;top:6px;left:50%;transform:translateX(-50%);z-index:60;',
-          'display:flex;align-items:center;gap:4px;',
-          'padding:3px 6px;border-radius:10px;',
-          'background:rgba(2,6,23,0.52);',
-          'backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);',
-          'border:1px solid rgba(255,255,255,0.07);',
-          'box-shadow:0 2px 12px rgba(0,0,0,0.35);',
-          'white-space:nowrap;',
-          'opacity:0;pointer-events:none;',
-          'transition:opacity 0.3s ease;',
+        // ── Botón toggle (esquina inferior derecha) ────────────────────
+        const toggle = document.createElement('button');
+        toggle.id = 'ctrl-toggle';
+        toggle.title = 'Controles';
+        toggle.style.cssText = [
+          'position:absolute;right:10px;bottom:10px;z-index:65;',
+          'width:32px;height:32px;border-radius:9px;',
+          'background:rgba(8,14,36,0.68);',
+          'backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);',
+          'border:1px solid rgba(255,255,255,0.10);',
+          'color:rgba(255,255,255,0.55);font-size:0.85rem;line-height:1;',
+          'cursor:pointer;display:flex;align-items:center;justify-content:center;',
+          'box-shadow:0 2px 10px rgba(0,0,0,0.5);',
+          'transition:background 0.2s,color 0.2s,transform 0.25s cubic-bezier(0.4,0,0.2,1);',
+        ].join('');
+        toggle.innerHTML = '⚙';
+
+        // ── Panel vertical ─────────────────────────────────────────────
+        const panel = document.createElement('div');
+        panel.id = 'ctrl-panel';
+        panel.style.cssText = [
+          'position:absolute;right:10px;bottom:50px;z-index:64;',
+          'display:flex;flex-direction:column;align-items:stretch;gap:2px;',
+          'width:116px;padding:7px;border-radius:12px;',
+          'background:rgba(6,10,28,0.82);',
+          'backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);',
+          'border:1px solid rgba(255,255,255,0.08);',
+          'box-shadow:0 8px 32px rgba(0,0,0,0.6),0 2px 8px rgba(0,0,0,0.3);',
+          'overflow:hidden;',
+          'max-height:0;opacity:0;pointer-events:none;',
+          'transition:max-height 0.35s cubic-bezier(0.4,0,0.2,1),opacity 0.22s ease;',
+          'transform-origin:bottom right;',
         ].join('');
 
-        const mkBtn = (id, html) => {
+        // helpers
+        const mkLabel = txt => {
+          const s = document.createElement('span');
+          s.style.cssText = 'display:block;font-size:0.48rem;font-weight:700;color:rgba(255,255,255,0.28);letter-spacing:0.08em;text-transform:uppercase;padding:4px 2px 2px;';
+          s.textContent = txt;
+          return s;
+        };
+        const mkSep = () => {
+          const d = document.createElement('div');
+          d.style.cssText = 'height:1px;background:rgba(255,255,255,0.06);margin:3px 0;';
+          return d;
+        };
+        const mkModeBtn = (id, html) => {
           const b = document.createElement('button');
           b.id = id;
           b.innerHTML = html;
-          b.style.cssText = 'padding:3px 9px;border-radius:7px;font-size:0.62rem;font-weight:700;border:none;cursor:pointer;transition:background 0.18s,color 0.18s;white-space:nowrap;letter-spacing:0.02em;';
+          b.style.cssText = [
+            'display:block;width:100%;text-align:left;',
+            'padding:5px 8px;border-radius:7px;border:none;cursor:pointer;',
+            'font-size:0.65rem;font-weight:700;letter-spacing:0.02em;',
+            'transition:background 0.15s,color 0.15s;',
+            'background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.5);',
+          ].join('');
           return b;
         };
 
-        const splitBtn   = mkBtn('pmb-split',   '⊞ Split');
-        const pipBtn     = mkBtn('pmb-pip',     '⧉ PiP');
-        const channelBtn = mkBtn('pmb-channel', '📺 Canal');
-        bar.appendChild(splitBtn);
-        bar.appendChild(pipBtn);
-        bar.appendChild(channelBtn);
+        // ── Sección MODO ───────────────────────────────────────────────
+        panel.appendChild(mkLabel('Modo'));
+        const splitBtn   = mkModeBtn('pmb-split',   '⊞  Split');
+        const pipBtn     = mkModeBtn('pmb-pip',     '⧉  PiP');
+        const channelBtn = mkModeBtn('pmb-channel', '📺  Canal');
+        panel.appendChild(splitBtn);
+        panel.appendChild(pipBtn);
+        panel.appendChild(channelBtn);
 
-        // Selectores (visibles solo en modo PiP)
+        panel.appendChild(mkSep());
+
+        // ── Sección AUDIO ──────────────────────────────────────────────
+        const audioSec = document.createElement('div');
+        audioSec.id = 'pmb-audio-switch';
+        audioSec.appendChild(mkLabel('Audio'));
+        const audioToggleBtn = document.createElement('button');
+        audioToggleBtn.id = 'pmb-audio-only-main';
+        audioToggleBtn.style.cssText = [
+          'display:block;width:100%;text-align:left;',
+          'padding:5px 8px;border-radius:7px;border:none;cursor:pointer;',
+          'font-size:0.65rem;font-weight:700;',
+          'transition:background 0.15s,color 0.15s;',
+        ].join('');
+        audioToggleBtn.innerHTML = _pipOnlyMainAudio ? '🔇 Solo principal' : '🔊 Ambos canales';
+        audioToggleBtn.style.background = _pipOnlyMainAudio ? 'rgba(255,255,255,0.07)' : 'rgba(16,185,129,0.88)';
+        audioToggleBtn.style.color = _pipOnlyMainAudio ? 'rgba(255,255,255,0.5)' : '#fff';
+        audioToggleBtn.addEventListener('click', () => {
+          _pipOnlyMainAudio = !_pipOnlyMainAudio;
+          try { localStorage.setItem(_PIP_AUDIO_KEY, String(_pipOnlyMainAudio)); } catch(_) {}
+          AudioManager.sync(streams);
+          _syncModeBar(streams);
+        });
+        audioSec.appendChild(audioToggleBtn);
+        panel.appendChild(audioSec);
+
+        panel.appendChild(mkSep());
+
+        // ── Sección PiP SELECTORS ──────────────────────────────────────
         const selWrap = document.createElement('div');
         selWrap.id = 'pmb-selectors';
-        selWrap.style.cssText = 'display:none;align-items:center;gap:8px;margin-left:4px;padding-left:8px;border-left:1.5px solid rgba(255,255,255,0.12);';
+        selWrap.style.cssText = 'display:none;flex-direction:column;gap:4px;';
+        selWrap.appendChild(mkLabel('PiP'));
 
-        const mkRadioGroup = (nameAttr, idPrefix, label, checkedIdx, onChange) => {
+        const mkRadioRow = (nameAttr, idPrefix, label, checkedIdx, onChange) => {
           const wrap = document.createElement('div');
-          wrap.style.cssText = 'display:flex;align-items:center;gap:5px;';
+          wrap.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
           const lbl = document.createElement('span');
-          lbl.style.cssText = 'font-size:0.62rem;color:rgba(255,255,255,0.52);font-weight:600;';
+          lbl.style.cssText = 'font-size:0.55rem;color:rgba(255,255,255,0.38);font-weight:600;padding:0 2px;';
           lbl.textContent = label;
           wrap.appendChild(lbl);
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;';
           streams.forEach((_, i) => {
             const rl = document.createElement('label');
             rl.style.cssText = 'display:flex;align-items:center;gap:3px;cursor:pointer;';
@@ -1783,73 +1768,68 @@
             r.type = 'radio'; r.name = nameAttr; r.value = String(i);
             r.id = idPrefix + '-r' + i;
             r.checked = (i === checkedIdx);
-            r.style.cssText = 'accent-color:#10b981;cursor:pointer;width:12px;height:12px;';
+            r.style.cssText = 'accent-color:#10b981;cursor:pointer;width:11px;height:11px;';
             r.addEventListener('change', () => onChange(i));
             const rt = document.createElement('span');
-            rt.style.cssText = 'font-size:0.62rem;color:#fff;font-weight:600;';
+            rt.style.cssText = 'font-size:0.6rem;color:rgba(255,255,255,0.8);font-weight:600;';
             rt.textContent = 'S' + (i + 1);
             rl.appendChild(r); rl.appendChild(rt);
-            wrap.appendChild(rl);
+            row.appendChild(rl);
           });
+          wrap.appendChild(row);
           return wrap;
         };
 
-        selWrap.appendChild(mkRadioGroup('pip-main', 'pmb-main', 'Principal:', _pipMainIdx, i => {
+        selWrap.appendChild(mkRadioRow('pip-main', 'pmb-main', 'Principal', _pipMainIdx, i => {
           _pipMainIdx = i;
           if (_pipFloatIdx === _pipMainIdx) {
             for (let j = 0; j < streams.length; j++) { if (j !== _pipMainIdx) { _pipFloatIdx = j; break; } }
           }
-          _applyPipLayout(streams);
-          AudioManager.sync(streams);
-          _syncModeBar(streams);
+          _applyPipLayout(streams); AudioManager.sync(streams); _syncModeBar(streams);
         }));
-
-        // Selector de flotante solo cuando hay 3+ streams
         if (streams.length >= 3) {
-          selWrap.appendChild(mkRadioGroup('pip-float', 'pmb-float', 'Flotante:', _pipFloatIdx, i => {
+          selWrap.appendChild(mkRadioRow('pip-float', 'pmb-float', 'Flotante', _pipFloatIdx, i => {
             if (i === _pipMainIdx) return;
             _pipFloatIdx = i;
-            _applyPipLayout(streams);
-            AudioManager.sync(streams);
-            _syncModeBar(streams);
+            _applyPipLayout(streams); AudioManager.sync(streams); _syncModeBar(streams);
           }));
         }
+        panel.appendChild(selWrap);
 
-        bar.appendChild(selWrap);
-
-        // ── Botón de audio: 🔊 Ambos / 🔇 Solo (siempre visible) ──────────
-        const audioSwitchWrap = document.createElement('div');
-        audioSwitchWrap.id = 'pmb-audio-switch';
-        audioSwitchWrap.style.cssText = 'display:flex;align-items:center;margin-left:4px;padding-left:8px;border-left:1.5px solid rgba(255,255,255,0.12);';
-
-        const audioToggleBtn = document.createElement('button');
-        audioToggleBtn.id = 'pmb-audio-only-main';
-        audioToggleBtn.style.cssText = 'padding:4px 10px;border-radius:8px;font-size:0.68rem;font-weight:700;border:none;cursor:pointer;transition:all 0.2s;white-space:nowrap;';
-        audioToggleBtn.innerHTML = _pipOnlyMainAudio ? '🔇 Solo' : '🔊 Ambos';
-        audioToggleBtn.style.background = _pipOnlyMainAudio ? 'rgba(255,255,255,0.08)' : 'rgba(16,185,129,0.88)';
-        audioToggleBtn.style.color = _pipOnlyMainAudio ? 'rgba(255,255,255,0.55)' : '#fff';
-
-        audioToggleBtn.addEventListener('click', () => {
-          _pipOnlyMainAudio = !_pipOnlyMainAudio;
-          try { localStorage.setItem(_PIP_AUDIO_KEY, String(_pipOnlyMainAudio)); } catch(_) {}
-          AudioManager.sync(streams);
-          _syncModeBar(streams);
+        // ── Sección CANAL CHIPS ────────────────────────────────────────
+        const chSection = document.createElement('div');
+        chSection.id = 'ctrl-channel-chips';
+        chSection.style.cssText = 'display:none;flex-direction:column;gap:3px;';
+        chSection.appendChild(mkLabel('Canal'));
+        const chRow = document.createElement('div');
+        chRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;';
+        streams.forEach((_, i) => {
+          const chip = document.createElement('button');
+          chip.id = 'ch-btn-' + i;
+          chip.textContent = 'S' + (i + 1);
+          chip.style.cssText = [
+            'padding:4px 9px;border-radius:6px;font-size:0.63rem;font-weight:700;',
+            'border:1px solid;cursor:pointer;',
+            'transition:background 0.15s,color 0.15s,border-color 0.15s;',
+            i === _channelIdx
+              ? 'background:rgba(16,185,129,0.88);color:#fff;border-color:rgba(16,185,129,0.45);'
+              : 'background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.5);border-color:rgba(255,255,255,0.08);',
+          ].join('');
+          chip.addEventListener('click', () => _switchChannel(i, streams));
+          chRow.appendChild(chip);
         });
+        chSection.appendChild(chRow);
+        panel.appendChild(chSection);
 
-        audioSwitchWrap.appendChild(audioToggleBtn);
-        bar.appendChild(audioSwitchWrap);
-
+        // ── Listeners de modo ──────────────────────────────────────────
         splitBtn.addEventListener('click', () => {
           _viewMode = 'split';
-          document.getElementById('channel-bar')?.remove();
           _applySplitLayout(streams);
           AudioManager.sync(streams);
           _syncModeBar(streams);
         });
-
         pipBtn.addEventListener('click', () => {
           _viewMode = 'pip';
-          document.getElementById('channel-bar')?.remove();
           if (_pipFloatIdx === _pipMainIdx || _pipFloatIdx >= streams.length) {
             for (let j = 0; j < streams.length; j++) { if (j !== _pipMainIdx) { _pipFloatIdx = j; break; } }
           }
@@ -1857,22 +1837,42 @@
           AudioManager.sync(streams);
           _syncModeBar(streams);
         });
-
         channelBtn.addEventListener('click', () => {
           _viewMode = 'channel';
-          // Restaurar _channelIdx desde localStorage o usar 0
           const saved = parseInt(localStorage.getItem(_CHANNEL_KEY));
           if (!isNaN(saved) && saved >= 0 && saved < streams.length) _channelIdx = saved;
           else _channelIdx = 0;
           _applyChannelLayout(streams);
-          _buildChannelBar(streams);
-          _barsShow?.();
           AudioManager.sync(streams);
           _syncModeBar(streams);
         });
 
-        viewerView.appendChild(bar);
-        _setupBarVisibility();
+        // ── Toggle open/close ──────────────────────────────────────────
+        function openPanel() {
+          _panelOpen = true;
+          panel.style.maxHeight = '520px';
+          panel.style.opacity = '1';
+          panel.style.pointerEvents = 'auto';
+          toggle.style.background = 'rgba(16,185,129,0.78)';
+          toggle.style.color = '#fff';
+          toggle.style.borderColor = 'rgba(16,185,129,0.35)';
+          toggle.style.transform = 'rotate(90deg)';
+        }
+        function closePanel() {
+          _panelOpen = false;
+          panel.style.maxHeight = '0';
+          panel.style.opacity = '0';
+          panel.style.pointerEvents = 'none';
+          toggle.style.background = 'rgba(8,14,36,0.68)';
+          toggle.style.color = 'rgba(255,255,255,0.55)';
+          toggle.style.borderColor = 'rgba(255,255,255,0.10)';
+          toggle.style.transform = 'rotate(0deg)';
+        }
+
+        toggle.addEventListener('click', () => _panelOpen ? closePanel() : openPanel());
+
+        viewerView.appendChild(panel);
+        viewerView.appendChild(toggle);
         _syncModeBar(streams);
       }
       // ═══════════════════════════════════════════════════════════════════
