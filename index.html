@@ -1253,14 +1253,356 @@
           audioBtn.appendChild(cb);
           audioBtn.appendChild(pill);
           div.appendChild(audioBtn);
+
+          // ── PiP: store div reference for layout switching ──
+          _sp[index].div = div;
+          _sp[index].splitClass = div.className;
+
           videoContainer.appendChild(div);
         });
       }
+
+      // ═══════════════════════════════════════════════════════════════════
+      //  PICTURE IN PICTURE MODE
+      // ═══════════════════════════════════════════════════════════════════
+      let _viewMode = 'split';   // 'split' | 'pip'
+      let _pipMainIdx = 0;       // stream principal en PiP
+      let _pipFloatIdx = 1;      // stream flotante en PiP
+      const _PIP_POS_KEY = 'pip-win-pos';
+
+      // ── Limpieza de drag listeners ─────────────────────────────────────
+      function _cleanPipDrag(div) {
+        if (!div || !div._pipDS) return;
+        div.removeEventListener('mousedown', div._pipOM0);
+        div.removeEventListener('touchstart', div._pipOM0);
+        document.removeEventListener('mousemove', div._pipOM1);
+        document.removeEventListener('touchmove', div._pipOM1);
+        document.removeEventListener('mouseup', div._pipOM2);
+        document.removeEventListener('touchend', div._pipOM2);
+        div._pipDS = false;
+      }
+
+      // ── Drag & Drop para ventana PiP ──────────────────────────────────
+      function _makePipDraggable(div) {
+        _cleanPipDrag(div);
+        let drag = false, sx, sy, sr, sb;
+
+        const onStart = e => {
+          if (e.target.closest('label,button,input,a')) return;
+          drag = true;
+          div.style.cursor = 'grabbing';
+          div.style.transition = 'box-shadow 0.2s';
+          const t = e.touches?.[0] || e;
+          sx = t.clientX; sy = t.clientY;
+          sr = parseInt(div.style.right) || 20;
+          sb = parseInt(div.style.bottom) || 20;
+          e.preventDefault();
+        };
+
+        const onMove = e => {
+          if (!drag) return;
+          const t = e.touches?.[0] || e;
+          const nr = Math.max(8, Math.min(window.innerWidth - div.offsetWidth - 8, sr - (t.clientX - sx)));
+          const nb = Math.max(8, Math.min(window.innerHeight - div.offsetHeight - 8, sb - (t.clientY - sy)));
+          div.style.right = nr + 'px';
+          div.style.bottom = nb + 'px';
+          e.preventDefault();
+        };
+
+        const onEnd = () => {
+          if (!drag) return;
+          drag = false;
+          div.style.cursor = 'grab';
+          try {
+            localStorage.setItem(_PIP_POS_KEY, JSON.stringify({
+              right: parseInt(div.style.right),
+              bottom: parseInt(div.style.bottom)
+            }));
+          } catch(_) {}
+        };
+
+        div._pipOM0 = onStart; div._pipOM1 = onMove; div._pipOM2 = onEnd; div._pipDS = true;
+        div.addEventListener('mousedown', onStart);
+        div.addEventListener('touchstart', onStart, { passive: false });
+        document.addEventListener('mousemove', onMove, { passive: false });
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('mouseup', onEnd);
+        document.addEventListener('touchend', onEnd);
+      }
+
+      // ── Layout: Split View ─────────────────────────────────────────────
+      function _applySplitLayout(streams) {
+        document.getElementById('pip-extra-list')?.remove();
+        videoContainer.removeAttribute('style');
+        const n = streams.length;
+
+        if (n >= 3) {
+          videoContainer.className = 'w-full h-full grid grid-cols-2 bg-black gap-px';
+        } else {
+          videoContainer.className = 'w-full h-full flex flex-col md:flex-row';
+        }
+
+        Object.keys(_sp).forEach(raw => {
+          const i = parseInt(raw), st = _sp[i];
+          if (!st?.div) return;
+          _cleanPipDrag(st.div);
+          st.div.querySelector('.pip-glass')?.remove();
+          st.div.removeAttribute('style');
+          if (n === 1) {
+            st.div.className = 'relative w-full h-full';
+          } else if (n === 2) {
+            st.div.className = i === 0
+              ? 'relative w-full md:w-1/2 h-1/2 md:h-full border-b md:border-b-0 md:border-r border-slate-800'
+              : 'relative w-full md:w-1/2 h-1/2 md:h-full';
+          } else {
+            st.div.className = 'relative w-full h-full min-h-0';
+          }
+        });
+      }
+
+      // ── Layout: PiP ────────────────────────────────────────────────────
+      function _applyPipLayout(streams) {
+        document.getElementById('pip-extra-list')?.remove();
+        videoContainer.removeAttribute('style');
+        videoContainer.style.position = 'relative';
+        videoContainer.className = 'w-full h-full';
+
+        let pos = { right: 20, bottom: 20 };
+        try {
+          const p = JSON.parse(localStorage.getItem(_PIP_POS_KEY));
+          if (p?.right != null) pos = p;
+        } catch(_) {}
+
+        const sm = window.innerWidth < 768;
+        const pipW = sm ? '40vw' : '28vw';
+
+        Object.keys(_sp).forEach(raw => {
+          const i = parseInt(raw), st = _sp[i];
+          if (!st?.div) return;
+          const div = st.div;
+          _cleanPipDrag(div);
+          div.querySelector('.pip-glass')?.remove();
+
+          if (i === _pipMainIdx) {
+            div.className = 'relative';
+            div.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;';
+
+          } else if (i === _pipFloatIdx) {
+            div.className = 'relative';
+            div.style.cssText = [
+              'position:absolute;',
+              'width:' + pipW + ';',
+              'aspect-ratio:16/9;',
+              'bottom:' + pos.bottom + 'px;',
+              'right:' + pos.right + 'px;',
+              'border-radius:14px;',
+              'overflow:hidden;',
+              'cursor:grab;',
+              'z-index:30;',
+              'transition:box-shadow 0.2s;',
+              'box-shadow:0 8px 40px rgba(0,0,0,0.78),0 2px 8px rgba(0,0,0,0.4),0 0 0 1.5px rgba(255,255,255,0.13);',
+            ].join('');
+
+            // Efecto glass + borde redondeado sobre el iframe/video
+            const gl = document.createElement('div');
+            gl.className = 'pip-glass';
+            gl.style.cssText = [
+              'position:absolute;inset:0;border-radius:14px;pointer-events:none;z-index:50;',
+              'background:linear-gradient(135deg,rgba(255,255,255,0.07) 0%,rgba(255,255,255,0) 60%);',
+              'border:1.5px solid rgba(255,255,255,0.17);',
+            ].join('');
+            div.appendChild(gl);
+
+            _makePipDraggable(div);
+
+          } else {
+            // Streams extra (3+): ocultos, accesibles desde el sidebar
+            div.style.cssText = 'position:absolute;display:none;';
+          }
+        });
+
+        // Sidebar de streams extra (3+ streams)
+        const extras = streams.map((_, i) => i).filter(i => i !== _pipMainIdx && i !== _pipFloatIdx);
+        if (extras.length > 0) {
+          const sidebar = document.createElement('div');
+          sidebar.id = 'pip-extra-list';
+          sidebar.style.cssText = [
+            'position:absolute;left:12px;bottom:12px;z-index:35;',
+            'display:flex;flex-direction:column;gap:6px;',
+          ].join('');
+          extras.forEach(i => {
+            const btn = document.createElement('button');
+            btn.style.cssText = [
+              'width:88px;aspect-ratio:16/9;border-radius:8px;',
+              'background:rgba(15,23,42,0.9);border:1.5px solid rgba(255,255,255,0.14);',
+              'color:rgba(255,255,255,0.8);font-size:0.6rem;font-weight:700;',
+              'cursor:pointer;transition:border-color 0.2s;',
+            ].join('');
+            btn.textContent = 'Stream ' + (i + 1);
+            btn.title = 'Ver Stream ' + (i + 1) + ' en PiP';
+            btn.addEventListener('mouseenter', () => { btn.style.borderColor = 'rgba(16,185,129,0.7)'; });
+            btn.addEventListener('mouseleave', () => { btn.style.borderColor = 'rgba(255,255,255,0.14)'; });
+            btn.addEventListener('click', () => {
+              _pipFloatIdx = i;
+              _applyPipLayout(streams);
+              _syncModeBar(streams);
+            });
+            sidebar.appendChild(btn);
+          });
+          viewerView.appendChild(sidebar);
+        }
+      }
+
+      // ── Sincronizar estado visual de la barra ─────────────────────────
+      function _syncModeBar(streams) {
+        const bar = document.getElementById('pip-mode-bar');
+        if (!bar) return;
+        const splitBtn = bar.querySelector('#pmb-split');
+        const pipBtn   = bar.querySelector('#pmb-pip');
+        const selWrap  = bar.querySelector('#pmb-selectors');
+
+        if (_viewMode === 'split') {
+          splitBtn.style.background = 'rgba(16,185,129,0.88)';
+          splitBtn.style.color = '#fff';
+          pipBtn.style.background = 'rgba(255,255,255,0.08)';
+          pipBtn.style.color = 'rgba(255,255,255,0.55)';
+          if (selWrap) selWrap.style.display = 'none';
+        } else {
+          pipBtn.style.background = 'rgba(16,185,129,0.88)';
+          pipBtn.style.color = '#fff';
+          splitBtn.style.background = 'rgba(255,255,255,0.08)';
+          splitBtn.style.color = 'rgba(255,255,255,0.55)';
+          if (selWrap) selWrap.style.display = 'flex';
+        }
+
+        // Sincronizar radios
+        streams.forEach((_, i) => {
+          const rM = document.getElementById('pmb-main-r' + i);
+          if (rM) rM.checked = (i === _pipMainIdx);
+          const rF = document.getElementById('pmb-float-r' + i);
+          if (rF) rF.checked = (i === _pipFloatIdx);
+        });
+      }
+
+      // ── Barra de modo (Split / PiP + selectores) ──────────────────────
+      function _buildModeSelector(streams) {
+        document.getElementById('pip-mode-bar')?.remove();
+        document.getElementById('pip-extra-list')?.remove();
+        if (streams.length < 2) return;
+
+        // Asegurar que _pipFloatIdx sea válido
+        if (_pipFloatIdx === _pipMainIdx || _pipFloatIdx >= streams.length) {
+          for (let j = 0; j < streams.length; j++) {
+            if (j !== _pipMainIdx) { _pipFloatIdx = j; break; }
+          }
+        }
+
+        const bar = document.createElement('div');
+        bar.id = 'pip-mode-bar';
+        bar.style.cssText = [
+          'position:absolute;top:4px;left:50%;transform:translateX(-50%);z-index:60;',
+          'display:flex;align-items:center;gap:6px;',
+          'padding:5px 8px;border-radius:1rem;',
+          'background:rgba(0,0,0,0.72);',
+          'backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);',
+          'border:1.5px solid rgba(255,255,255,0.10);',
+          'box-shadow:0 4px 24px rgba(0,0,0,0.5);',
+          'white-space:nowrap;',
+        ].join('');
+
+        const mkBtn = (id, html) => {
+          const b = document.createElement('button');
+          b.id = id;
+          b.innerHTML = html;
+          b.style.cssText = 'padding:4px 10px;border-radius:8px;font-size:0.68rem;font-weight:700;border:none;cursor:pointer;transition:all 0.2s;white-space:nowrap;';
+          return b;
+        };
+
+        const splitBtn = mkBtn('pmb-split', '⊞ Split');
+        const pipBtn   = mkBtn('pmb-pip',   '⧉ PiP');
+        bar.appendChild(splitBtn);
+        bar.appendChild(pipBtn);
+
+        // Selectores (visibles solo en modo PiP)
+        const selWrap = document.createElement('div');
+        selWrap.id = 'pmb-selectors';
+        selWrap.style.cssText = 'display:none;align-items:center;gap:8px;margin-left:4px;padding-left:8px;border-left:1.5px solid rgba(255,255,255,0.12);';
+
+        const mkRadioGroup = (nameAttr, idPrefix, label, checkedIdx, onChange) => {
+          const wrap = document.createElement('div');
+          wrap.style.cssText = 'display:flex;align-items:center;gap:5px;';
+          const lbl = document.createElement('span');
+          lbl.style.cssText = 'font-size:0.62rem;color:rgba(255,255,255,0.52);font-weight:600;';
+          lbl.textContent = label;
+          wrap.appendChild(lbl);
+          streams.forEach((_, i) => {
+            const rl = document.createElement('label');
+            rl.style.cssText = 'display:flex;align-items:center;gap:3px;cursor:pointer;';
+            const r = document.createElement('input');
+            r.type = 'radio'; r.name = nameAttr; r.value = String(i);
+            r.id = idPrefix + '-r' + i;
+            r.checked = (i === checkedIdx);
+            r.style.cssText = 'accent-color:#10b981;cursor:pointer;width:12px;height:12px;';
+            r.addEventListener('change', () => onChange(i));
+            const rt = document.createElement('span');
+            rt.style.cssText = 'font-size:0.62rem;color:#fff;font-weight:600;';
+            rt.textContent = 'S' + (i + 1);
+            rl.appendChild(r); rl.appendChild(rt);
+            wrap.appendChild(rl);
+          });
+          return wrap;
+        };
+
+        selWrap.appendChild(mkRadioGroup('pip-main', 'pmb-main', 'Principal:', _pipMainIdx, i => {
+          _pipMainIdx = i;
+          if (_pipFloatIdx === _pipMainIdx) {
+            for (let j = 0; j < streams.length; j++) { if (j !== _pipMainIdx) { _pipFloatIdx = j; break; } }
+          }
+          _applyPipLayout(streams);
+          _syncModeBar(streams);
+        }));
+
+        // Selector de flotante solo cuando hay 3+ streams
+        if (streams.length >= 3) {
+          selWrap.appendChild(mkRadioGroup('pip-float', 'pmb-float', 'Flotante:', _pipFloatIdx, i => {
+            if (i === _pipMainIdx) return;
+            _pipFloatIdx = i;
+            _applyPipLayout(streams);
+            _syncModeBar(streams);
+          }));
+        }
+
+        bar.appendChild(selWrap);
+
+        splitBtn.addEventListener('click', () => {
+          _viewMode = 'split';
+          _applySplitLayout(streams);
+          _syncModeBar(streams);
+        });
+
+        pipBtn.addEventListener('click', () => {
+          _viewMode = 'pip';
+          if (_pipFloatIdx === _pipMainIdx || _pipFloatIdx >= streams.length) {
+            for (let j = 0; j < streams.length; j++) { if (j !== _pipMainIdx) { _pipFloatIdx = j; break; } }
+          }
+          _applyPipLayout(streams);
+          _syncModeBar(streams);
+        });
+
+        viewerView.appendChild(bar);
+        _syncModeBar(streams);
+      }
+      // ═══════════════════════════════════════════════════════════════════
+      //  END PICTURE IN PICTURE MODE
+      // ═══════════════════════════════════════════════════════════════════
 
       // 1. Detectar modo (Admin, Visor o Expirado)
       const params = new URLSearchParams(window.location.search);
       const s1 = params.get('s1');
       const s2 = params.get('s2');
+      const s3 = params.get('s3');
+      const s4 = params.get('s4');
+      const s5 = params.get('s5');
       const linkId = params.get('linkId');
 
       if (linkId) {
@@ -1278,11 +1620,12 @@
             } else {
               // Usar los streams del enlace guardado
               const streams = [
-                linkData.s1 ? decodeURIComponent(linkData.s1) : null, 
+                linkData.s1 ? decodeURIComponent(linkData.s1) : null,
                 linkData.s2 ? decodeURIComponent(linkData.s2) : null
               ].filter(Boolean);
-              
+
               loadViewer(streams);
+              _buildModeSelector(streams);
             }
           } else {
             expiredView.classList.remove('hidden');
@@ -1291,21 +1634,29 @@
           console.error('Error checking link:', e);
           // Fallback: cargar desde s1/s2
           const streams = [
-            s1 ? decodeURIComponent(s1) : null, 
-            s2 ? decodeURIComponent(s2) : null
+            s1 ? decodeURIComponent(s1) : null,
+            s2 ? decodeURIComponent(s2) : null,
+            s3 ? decodeURIComponent(s3) : null,
+            s4 ? decodeURIComponent(s4) : null,
+            s5 ? decodeURIComponent(s5) : null,
           ].filter(Boolean);
           if (streams.length > 0) {
             loadViewer(streams);
+            _buildModeSelector(streams);
           } else {
             adminView.classList.remove('hidden');
           }
         }
-      } else if (s1 || s2) {
+      } else if (s1 || s2 || s3 || s4 || s5) {
         const streams = [
-          s1 ? decodeURIComponent(s1) : null, 
-          s2 ? decodeURIComponent(s2) : null
+          s1 ? decodeURIComponent(s1) : null,
+          s2 ? decodeURIComponent(s2) : null,
+          s3 ? decodeURIComponent(s3) : null,
+          s4 ? decodeURIComponent(s4) : null,
+          s5 ? decodeURIComponent(s5) : null,
         ].filter(Boolean);
         loadViewer(streams);
+        _buildModeSelector(streams);
       } else {
         adminView.classList.remove('hidden');
       }
