@@ -445,11 +445,11 @@
        VISTA DEL VISOR (TV)
        ========================================== -->
   <div id="viewer-view" class="fixed inset-0 bg-black flex-col md:flex-row overflow-hidden w-full h-full hidden">
-    <button id="btn-fullscreen" class="absolute top-4 left-4 z-50 bg-black/80 hover:bg-black/95 text-white p-4 rounded-2xl opacity-80 hover:opacity-100 transition-all backdrop-blur-xl shadow-2xl flex items-center gap-3 group">
-      <svg id="icon-fullscreen" xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <button id="btn-fullscreen" class="absolute bottom-4 left-4 z-50 bg-black/80 hover:bg-black/95 text-white p-2.5 rounded-xl opacity-60 hover:opacity-90 transition-all backdrop-blur-xl shadow-lg flex items-center gap-2 group">
+      <svg id="icon-fullscreen" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
       </svg>
-      <span id="text-fullscreen" class="hidden group-hover:inline font-bold text-lg pr-2">Pantalla Completa</span>
+      <span id="text-fullscreen" class="hidden group-hover:inline font-bold text-xs pr-1">Fullscreen</span>
     </button>
 
     <div id="video-container" class="w-full h-full flex flex-col md:flex-row">
@@ -1266,8 +1266,10 @@
       // ═══════════════════════════════════════════════════════════════════
       //  PICTURE IN PICTURE MODE
       // ═══════════════════════════════════════════════════════════════════
-      let _viewMode = 'split';   // 'split' | 'pip'
+      let _viewMode = 'split';   // 'split' | 'pip' | 'channel'
       let _pipMainIdx = 0;       // stream principal en PiP
+      const _CHANNEL_KEY = 'channel-active-idx';
+      let _channelIdx = parseInt(localStorage.getItem(_CHANNEL_KEY) || '0') || 0;
       let _pipFloatIdx = 1;      // stream flotante en PiP
       const _PIP_POS_KEY = 'pip-win-pos';
       const _PIP_AUDIO_KEY = 'pip-only-main-audio';
@@ -1456,6 +1458,82 @@
         }
       }
 
+      // ═══════════════════════════════════════════════════════════════════
+      //  CHANNEL MODE (zapping a pantalla completa)
+      // ═══════════════════════════════════════════════════════════════════
+
+      // Layout: un solo stream visible, el resto oculto (sin destruir DOM)
+      function _applyChannelLayout(streams) {
+        document.getElementById('pip-extra-list')?.remove();
+        videoContainer.removeAttribute('style');
+        videoContainer.style.position = 'relative';
+        videoContainer.className = 'w-full h-full';
+
+        Object.keys(_sp).forEach(raw => {
+          const i = parseInt(raw), st = _sp[i];
+          if (!st?.div) return;
+          _cleanPipDrag(st.div);
+          st.div.querySelector('.pip-glass')?.remove();
+          if (i === _channelIdx) {
+            st.div.removeAttribute('style');
+            st.div.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;';
+            st.div.className = 'relative';
+          } else {
+            st.div.style.cssText = 'position:absolute;display:none;';
+            st.div.className = 'relative';
+          }
+        });
+      }
+
+      // Cambiar canal activo (solo visibilidad + audio, sin tocar iframes)
+      function _switchChannel(idx, streams) {
+        _channelIdx = idx;
+        try { localStorage.setItem(_CHANNEL_KEY, String(idx)); } catch(_) {}
+        _applyChannelLayout(streams);
+        AudioManager.applyChannelMode(streams);
+        _syncModeBar(streams);
+      }
+
+      // Barra de chips S1/S2/S3... para modo Canal
+      function _buildChannelBar(streams) {
+        document.getElementById('channel-bar')?.remove();
+
+        const bar = document.createElement('div');
+        bar.id = 'channel-bar';
+        bar.style.cssText = [
+          'position:absolute;top:44px;left:50%;transform:translateX(-50%);z-index:59;',
+          'display:flex;align-items:center;gap:5px;',
+          'padding:4px 8px;border-radius:0.9rem;',
+          'background:rgba(0,0,0,0.65);',
+          'backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);',
+          'border:1.5px solid rgba(255,255,255,0.09);',
+          'box-shadow:0 4px 20px rgba(0,0,0,0.45);',
+          'white-space:nowrap;',
+        ].join('');
+
+        streams.forEach((_, i) => {
+          const btn = document.createElement('button');
+          btn.id = 'ch-btn-' + i;
+          btn.textContent = 'S' + (i + 1);
+          btn.style.cssText = [
+            'padding:4px 11px;border-radius:7px;font-size:0.68rem;font-weight:700;',
+            'border:1.5px solid rgba(255,255,255,0.12);cursor:pointer;',
+            'transition:background 0.18s,color 0.18s,border-color 0.18s;',
+            i === _channelIdx
+              ? 'background:rgba(16,185,129,0.88);color:#fff;border-color:rgba(16,185,129,0.5);box-shadow:0 0 14px rgba(16,185,129,0.4);'
+              : 'background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.55);',
+          ].join('');
+          btn.addEventListener('click', () => _switchChannel(i, streams));
+          bar.appendChild(btn);
+        });
+
+        viewerView.appendChild(bar);
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      //  END CHANNEL MODE
+      // ═══════════════════════════════════════════════════════════════════
+
       // ── Utilidad: elementos del pill de audio ─────────────────────────
       function _getPillElements(index) {
         const label = document.getElementById('audio-btn-' + index);
@@ -1503,9 +1581,25 @@
           });
         },
 
-        // Punto de entrada unificado — sincroniza audio según estado actual (split o pip).
+        // Canal: solo el stream visible tiene audio; el resto forzado a mute.
+        applyChannelMode(streams) {
+          streams.forEach((_, i) => {
+            const shouldMute = (i !== _channelIdx);
+            const st = _sp[i];
+            if (!st) return;
+            if (st._channelForcedMute !== shouldMute) {
+              _applyMute(i, shouldMute);
+              st._channelForcedMute = shouldMute;
+            }
+            this._syncPillVisual(i, !shouldMute);
+          });
+        },
+
+        // Punto de entrada unificado — sincroniza audio según estado actual.
         sync(streams) {
-          if (_pipOnlyMainAudio) {
+          if (_viewMode === 'channel') {
+            this.applyChannelMode(streams);
+          } else if (_pipOnlyMainAudio) {
             this.applyPipMode(streams);
           } else {
             this.restoreOriginalAudio();
@@ -1517,26 +1611,50 @@
       function _syncModeBar(streams) {
         const bar = document.getElementById('pip-mode-bar');
         if (!bar) return;
-        const splitBtn = bar.querySelector('#pmb-split');
-        const pipBtn   = bar.querySelector('#pmb-pip');
-        const selWrap  = bar.querySelector('#pmb-selectors');
-
+        const splitBtn   = bar.querySelector('#pmb-split');
+        const pipBtn     = bar.querySelector('#pmb-pip');
+        const channelBtn = bar.querySelector('#pmb-channel');
+        const selWrap    = bar.querySelector('#pmb-selectors');
         const audioSwitch = bar.querySelector('#pmb-audio-switch');
+
+        // Reset todos los botones de modo
+        [splitBtn, pipBtn, channelBtn].forEach(b => {
+          if (!b) return;
+          b.style.background = 'rgba(255,255,255,0.08)';
+          b.style.color = 'rgba(255,255,255,0.55)';
+        });
+
         if (_viewMode === 'split') {
-          splitBtn.style.background = 'rgba(16,185,129,0.88)';
-          splitBtn.style.color = '#fff';
-          pipBtn.style.background = 'rgba(255,255,255,0.08)';
-          pipBtn.style.color = 'rgba(255,255,255,0.55)';
+          if (splitBtn) { splitBtn.style.background = 'rgba(16,185,129,0.88)'; splitBtn.style.color = '#fff'; }
           if (selWrap) selWrap.style.display = 'none';
-        } else {
-          pipBtn.style.background = 'rgba(16,185,129,0.88)';
-          pipBtn.style.color = '#fff';
-          splitBtn.style.background = 'rgba(255,255,255,0.08)';
-          splitBtn.style.color = 'rgba(255,255,255,0.55)';
+          document.getElementById('channel-bar')?.remove();
+        } else if (_viewMode === 'pip') {
+          if (pipBtn) { pipBtn.style.background = 'rgba(16,185,129,0.88)'; pipBtn.style.color = '#fff'; }
           if (selWrap) selWrap.style.display = 'flex';
+          document.getElementById('channel-bar')?.remove();
+        } else if (_viewMode === 'channel') {
+          if (channelBtn) { channelBtn.style.background = 'rgba(16,185,129,0.88)'; channelBtn.style.color = '#fff'; }
+          if (selWrap) selWrap.style.display = 'none';
+          // Actualizar chips del canal bar si ya existe
+          streams.forEach((_, i) => {
+            const chip = document.getElementById('ch-btn-' + i);
+            if (!chip) return;
+            if (i === _channelIdx) {
+              chip.style.background = 'rgba(16,185,129,0.88)';
+              chip.style.color = '#fff';
+              chip.style.borderColor = 'rgba(16,185,129,0.5)';
+              chip.style.boxShadow = '0 0 14px rgba(16,185,129,0.4)';
+            } else {
+              chip.style.background = 'rgba(255,255,255,0.08)';
+              chip.style.color = 'rgba(255,255,255,0.55)';
+              chip.style.borderColor = 'rgba(255,255,255,0.12)';
+              chip.style.boxShadow = '';
+            }
+          });
         }
-        // Botón de audio: siempre visible, actualizar apariencia según estado
-        if (audioSwitch) audioSwitch.style.display = 'flex';
+
+        // Botón de audio: visible en split/pip, oculto en canal (audio exclusivo forzado)
+        if (audioSwitch) audioSwitch.style.display = _viewMode === 'channel' ? 'none' : 'flex';
         const audioToggle = document.getElementById('pmb-audio-only-main');
         if (audioToggle) {
           audioToggle.innerHTML = _pipOnlyMainAudio ? '🔇 Solo' : '🔊 Ambos';
@@ -1544,7 +1662,7 @@
           audioToggle.style.color = _pipOnlyMainAudio ? 'rgba(255,255,255,0.55)' : '#fff';
         }
 
-        // Sincronizar radios
+        // Sincronizar radios PiP
         streams.forEach((_, i) => {
           const rM = document.getElementById('pmb-main-r' + i);
           if (rM) rM.checked = (i === _pipMainIdx);
@@ -1587,10 +1705,12 @@
           return b;
         };
 
-        const splitBtn = mkBtn('pmb-split', '⊞ Split');
-        const pipBtn   = mkBtn('pmb-pip',   '⧉ PiP');
+        const splitBtn   = mkBtn('pmb-split',   '⊞ Split');
+        const pipBtn     = mkBtn('pmb-pip',     '⧉ PiP');
+        const channelBtn = mkBtn('pmb-channel', '📺 Canal');
         bar.appendChild(splitBtn);
         bar.appendChild(pipBtn);
+        bar.appendChild(channelBtn);
 
         // Selectores (visibles solo en modo PiP)
         const selWrap = document.createElement('div');
@@ -1669,6 +1789,7 @@
 
         splitBtn.addEventListener('click', () => {
           _viewMode = 'split';
+          document.getElementById('channel-bar')?.remove();
           _applySplitLayout(streams);
           AudioManager.sync(streams);
           _syncModeBar(streams);
@@ -1676,10 +1797,23 @@
 
         pipBtn.addEventListener('click', () => {
           _viewMode = 'pip';
+          document.getElementById('channel-bar')?.remove();
           if (_pipFloatIdx === _pipMainIdx || _pipFloatIdx >= streams.length) {
             for (let j = 0; j < streams.length; j++) { if (j !== _pipMainIdx) { _pipFloatIdx = j; break; } }
           }
           _applyPipLayout(streams);
+          AudioManager.sync(streams);
+          _syncModeBar(streams);
+        });
+
+        channelBtn.addEventListener('click', () => {
+          _viewMode = 'channel';
+          // Restaurar _channelIdx desde localStorage o usar 0
+          const saved = parseInt(localStorage.getItem(_CHANNEL_KEY));
+          if (!isNaN(saved) && saved >= 0 && saved < streams.length) _channelIdx = saved;
+          else _channelIdx = 0;
+          _applyChannelLayout(streams);
+          _buildChannelBar(streams);
           AudioManager.sync(streams);
           _syncModeBar(streams);
         });
