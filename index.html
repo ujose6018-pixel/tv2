@@ -1208,10 +1208,11 @@
             div.appendChild(vlcBarNative);
           }
 
-          // ── Dual Sound pill (bottom-right) ──
+          // ── Dual Sound pill (bottom-right) ── oculto: audio gestionado desde la barra superior
           const audioBtn = document.createElement('label');
           audioBtn.id = `audio-btn-${index}`;
           audioBtn.className = 'absolute bottom-5 right-5 z-40 flex items-center cursor-pointer select-none';
+          audioBtn.style.display = 'none';
           if (forced) audioBtn.style.cursor = 'default';
 
           const cb = document.createElement('input');
@@ -1269,6 +1270,8 @@
       let _pipMainIdx = 0;       // stream principal en PiP
       let _pipFloatIdx = 1;      // stream flotante en PiP
       const _PIP_POS_KEY = 'pip-win-pos';
+      const _PIP_AUDIO_KEY = 'pip-only-main-audio';
+      let _pipOnlyMainAudio = localStorage.getItem(_PIP_AUDIO_KEY) === 'true'; // default: dual audio (ON)
 
       // ── Limpieza de drag listeners ─────────────────────────────────────
       function _cleanPipDrag(div) {
@@ -1453,6 +1456,63 @@
         }
       }
 
+      // ── Utilidad: elementos del pill de audio ─────────────────────────
+      function _getPillElements(index) {
+        const label = document.getElementById('audio-btn-' + index);
+        if (!label) return null;
+        const pill = label.querySelector('div');
+        const iconSpan = pill ? pill.querySelector('span') : null;
+        return (pill && iconSpan) ? { pill, iconSpan } : null;
+      }
+
+      // ── AudioManager: controlador centralizado de audio ───────────────
+      const AudioManager = {
+
+        // Sincroniza visualmente el pill sin alterar el estado del checkbox
+        _syncPillVisual(index, active) {
+          const els = _getPillElements(index);
+          if (els) _updatePill(els.pill, els.iconSpan, active);
+        },
+
+        // PiP audio exclusivo: solo el stream principal reproduce audio.
+        // Solo llama _applyMute cuando el estado realmente cambia (evita ops redundantes).
+        applyPipMode(streams) {
+          if (!_pipOnlyMainAudio) { this.restoreOriginalAudio(); return; }
+          streams.forEach((_, i) => {
+            const shouldMute = (i !== _pipMainIdx);
+            const st = _sp[i];
+            if (!st) return;
+            if (st._pipForcedMute !== shouldMute) {
+              _applyMute(i, shouldMute);
+              st._pipForcedMute = shouldMute;
+            }
+            this._syncPillVisual(i, !shouldMute);
+          });
+        },
+
+        // Restaura el audio al estado original definido por los checkboxes del usuario.
+        restoreOriginalAudio() {
+          Object.keys(_sp).forEach(raw => {
+            const i = parseInt(raw), st = _sp[i];
+            if (!st) return;
+            const cbEl = document.getElementById('audio-cb-' + i);
+            const shouldBeActive = cbEl ? cbEl.checked : (i === 0);
+            _applyMute(i, !shouldBeActive);
+            delete st._pipForcedMute;
+            this._syncPillVisual(i, shouldBeActive);
+          });
+        },
+
+        // Punto de entrada unificado — sincroniza audio según estado actual (split o pip).
+        sync(streams) {
+          if (_pipOnlyMainAudio) {
+            this.applyPipMode(streams);
+          } else {
+            this.restoreOriginalAudio();
+          }
+        }
+      };
+
       // ── Sincronizar estado visual de la barra ─────────────────────────
       function _syncModeBar(streams) {
         const bar = document.getElementById('pip-mode-bar');
@@ -1461,6 +1521,7 @@
         const pipBtn   = bar.querySelector('#pmb-pip');
         const selWrap  = bar.querySelector('#pmb-selectors');
 
+        const audioSwitch = bar.querySelector('#pmb-audio-switch');
         if (_viewMode === 'split') {
           splitBtn.style.background = 'rgba(16,185,129,0.88)';
           splitBtn.style.color = '#fff';
@@ -1473,6 +1534,14 @@
           splitBtn.style.background = 'rgba(255,255,255,0.08)';
           splitBtn.style.color = 'rgba(255,255,255,0.55)';
           if (selWrap) selWrap.style.display = 'flex';
+        }
+        // Botón de audio: siempre visible, actualizar apariencia según estado
+        if (audioSwitch) audioSwitch.style.display = 'flex';
+        const audioToggle = document.getElementById('pmb-audio-only-main');
+        if (audioToggle) {
+          audioToggle.innerHTML = _pipOnlyMainAudio ? '🔇 Solo' : '🔊 Ambos';
+          audioToggle.style.background = _pipOnlyMainAudio ? 'rgba(255,255,255,0.08)' : 'rgba(16,185,129,0.88)';
+          audioToggle.style.color = _pipOnlyMainAudio ? 'rgba(255,255,255,0.55)' : '#fff';
         }
 
         // Sincronizar radios
@@ -1559,6 +1628,7 @@
             for (let j = 0; j < streams.length; j++) { if (j !== _pipMainIdx) { _pipFloatIdx = j; break; } }
           }
           _applyPipLayout(streams);
+          AudioManager.sync(streams);
           _syncModeBar(streams);
         }));
 
@@ -1568,15 +1638,39 @@
             if (i === _pipMainIdx) return;
             _pipFloatIdx = i;
             _applyPipLayout(streams);
+            AudioManager.sync(streams);
             _syncModeBar(streams);
           }));
         }
 
         bar.appendChild(selWrap);
 
+        // ── Botón de audio: 🔊 Ambos / 🔇 Solo (siempre visible) ──────────
+        const audioSwitchWrap = document.createElement('div');
+        audioSwitchWrap.id = 'pmb-audio-switch';
+        audioSwitchWrap.style.cssText = 'display:flex;align-items:center;margin-left:4px;padding-left:8px;border-left:1.5px solid rgba(255,255,255,0.12);';
+
+        const audioToggleBtn = document.createElement('button');
+        audioToggleBtn.id = 'pmb-audio-only-main';
+        audioToggleBtn.style.cssText = 'padding:4px 10px;border-radius:8px;font-size:0.68rem;font-weight:700;border:none;cursor:pointer;transition:all 0.2s;white-space:nowrap;';
+        audioToggleBtn.innerHTML = _pipOnlyMainAudio ? '🔇 Solo' : '🔊 Ambos';
+        audioToggleBtn.style.background = _pipOnlyMainAudio ? 'rgba(255,255,255,0.08)' : 'rgba(16,185,129,0.88)';
+        audioToggleBtn.style.color = _pipOnlyMainAudio ? 'rgba(255,255,255,0.55)' : '#fff';
+
+        audioToggleBtn.addEventListener('click', () => {
+          _pipOnlyMainAudio = !_pipOnlyMainAudio;
+          try { localStorage.setItem(_PIP_AUDIO_KEY, String(_pipOnlyMainAudio)); } catch(_) {}
+          AudioManager.sync(streams);
+          _syncModeBar(streams);
+        });
+
+        audioSwitchWrap.appendChild(audioToggleBtn);
+        bar.appendChild(audioSwitchWrap);
+
         splitBtn.addEventListener('click', () => {
           _viewMode = 'split';
           _applySplitLayout(streams);
+          AudioManager.sync(streams);
           _syncModeBar(streams);
         });
 
@@ -1586,6 +1680,7 @@
             for (let j = 0; j < streams.length; j++) { if (j !== _pipMainIdx) { _pipFloatIdx = j; break; } }
           }
           _applyPipLayout(streams);
+          AudioManager.sync(streams);
           _syncModeBar(streams);
         });
 
