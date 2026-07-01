@@ -53,6 +53,7 @@
     .mo-badge { display:inline-block; padding:6px 16px; border-radius:999px; font-weight:700; font-size:14px; margin-bottom:16px;
       background: rgba(245,158,11,0.18); color:#fcd34d; }
     .mo-time { font-size: 26px; font-weight: 900; margin: 6px 0; }
+    .cd-clock { font-size: 46px; font-weight: 900; letter-spacing: 2px; margin: 12px 0 6px; color: #fcd34d; font-variant-numeric: tabular-nums; }
     .mo-note { color:#94a3b8; font-size:14px; margin-top:12px; }
     .mo-btn { display:inline-block; margin-top:28px; padding:12px 30px; border-radius:16px; font-weight:700;
       color:#0f172a; text-decoration:none; background: linear-gradient(135deg,#f59e0b,#fcd34d); }
@@ -201,6 +202,34 @@
       // ── Visor de partido (la señal la decide el admin) ──
       let currentSignalUrl = null;
 
+      // Cuenta regresiva + activación automática por horario
+      const AUTO_PLAY_MIN = 10;   // el reproductor arranca solo 10 min antes del inicio
+      let countdownTimer = null;
+      const clearCountdown = () => { if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; } };
+      const koMillis = (m) => (m.kickoff?.seconds ? m.kickoff.seconds * 1000 : null);
+      function formatCountdown(ms) {
+        if (ms <= 0) return '00:00:00';
+        let s = Math.floor(ms / 1000);
+        const d = Math.floor(s / 86400); s -= d * 86400;
+        const h = Math.floor(s / 3600); s -= h * 3600;
+        const mm = Math.floor(s / 60); s -= mm * 60;
+        const p = n => String(n).padStart(2, '0');
+        return (d > 0 ? d + 'd ' : '') + p(h) + ':' + p(mm) + ':' + p(s);
+      }
+      function shouldPlay(m) {
+        if (m.status === 'finished') return false;
+        if (m.status === 'live') return true;       // el admin lo fuerza en vivo
+        const ko = koMillis(m);
+        if (ko == null) return false;               // sin hora → esperar al admin
+        return Date.now() >= ko - AUTO_PLAY_MIN * 60000;
+      }
+      function updateCountdownText() {
+        const el = document.getElementById('cd-big');
+        if (!el || !window._m) return;
+        const ko = koMillis(window._m);
+        el.textContent = ko ? formatCountdown(ko - Date.now()) : '';
+      }
+
       function teamsBlock(m) {
         const badge = (name, logo) => `
           <div style="display:flex;flex-direction:column;align-items:center;gap:8px;width:110px;">
@@ -211,6 +240,8 @@
       }
 
       function applyMatchState(m) {
+        clearCountdown();
+        window._m = m;
         document.title = (m.title || 'Partido') + ' · En Vivo';
 
         if (m.status === 'finished') {
@@ -224,33 +255,43 @@
             </div>`);
           return;
         }
-        if (m.status !== 'live') {
-          showMatchOverlay(`
-            <div style="max-width:520px;">
-              <span class="mo-badge">🕐 PRÓXIMAMENTE</span>
-              <div style="margin-bottom:18px;">${teamsBlock(m)}</div>
-              <p style="color:#94a3b8;font-size:14px;margin:0;">${esc(m.competition || '')}</p>
-              <p class="mo-time">${timeLabel(m) || 'Muy pronto'}</p>
-              <p class="mo-note">La transmisión comenzará pronto. Esta página se actualiza sola. ⚡</p>
-              <a href="index.html" class="mo-btn">🏠 Ver otros partidos</a>
-            </div>`);
+
+        // ¿Toca reproducir? (admin en vivo, o faltan <= AUTO_PLAY_MIN min)
+        if (shouldPlay(m)) {
+          const signals = m.signals || [];
+          const sig = signals[m.activeSignal || 0] || signals[0];
+          if (!sig || !sig.url) {
+            showMatchOverlay(`
+              <div style="max-width:520px;">
+                <div style="font-size:56px;margin-bottom:12px;">📡</div>
+                <h2 style="font-size:24px;font-weight:900;color:#e2e8f0;">Señal no disponible</h2>
+                <p style="color:#94a3b8;margin-top:8px;">El administrador aún no ha asignado una señal.</p>
+                <a href="index.html" class="mo-btn">🏠 Ver otros partidos</a>
+              </div>`);
+            return;
+          }
+          showViewer();
+          if (currentSignalUrl !== sig.url) { currentSignalUrl = sig.url; mountSingle(sig.url); }
           return;
         }
 
-        const signals = m.signals || [];
-        const sig = signals[m.activeSignal || 0] || signals[0];
-        if (!sig || !sig.url) {
-          showMatchOverlay(`
-            <div style="max-width:520px;">
-              <div style="font-size:56px;margin-bottom:12px;">📡</div>
-              <h2 style="font-size:24px;font-weight:900;color:#e2e8f0;">Señal no disponible</h2>
-              <p style="color:#94a3b8;margin-top:8px;">El administrador aún no ha asignado una señal.</p>
-              <a href="index.html" class="mo-btn">🏠 Ver otros partidos</a>
-            </div>`);
-          return;
-        }
-        showViewer();
-        if (currentSignalUrl !== sig.url) { currentSignalUrl = sig.url; mountSingle(sig.url); }
+        // Próximamente → cuenta regresiva y auto-arranque
+        const timeStr = koMillis(m) ? timeLabel(m) : 'Por confirmar';
+        showMatchOverlay(`
+          <div style="max-width:560px;">
+            <span class="mo-badge">🕐 PRÓXIMAMENTE</span>
+            <div style="margin-bottom:14px;">${teamsBlock(m)}</div>
+            <p style="color:#94a3b8;font-size:14px;margin:0;">${esc(m.competition || '')}</p>
+            <p style="color:#e2e8f0;font-size:15px;margin:6px 0 0;">🕐 Inicio: ${esc(timeStr)}</p>
+            <div class="cd-clock" id="cd-big">--:--:--</div>
+            <p class="mo-note">▶️ La transmisión se activa sola ${AUTO_PLAY_MIN} min antes del inicio.</p>
+            <a href="index.html" class="mo-btn">🏠 Ver otros partidos</a>
+          </div>`);
+        updateCountdownText();
+        countdownTimer = setInterval(() => {
+          if (shouldPlay(window._m)) applyMatchState(window._m);  // arranca el reproductor
+          else updateCountdownText();
+        }, 1000);
       }
 
       function openMatch(matchId) {

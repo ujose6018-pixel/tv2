@@ -42,6 +42,9 @@
     .card-glow { box-shadow: 0 16px 40px rgba(0,0,0,0.45); }
     .match-card { transition: transform .2s, box-shadow .2s, border-color .2s; cursor: pointer; }
     .match-card:hover { transform: translateY(-4px); border-color: rgba(16,185,129,0.6); }
+    .match-card.locked { cursor: default; }
+    .match-card.locked:hover { transform: none; border-color: rgba(71,85,105,0.55); }
+    .cd { font-variant-numeric: tabular-nums; }
     .chip { transition: background .2s, color .2s; }
     @keyframes live-blink { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
     .live-dot { animation: live-blink 1.1s ease-in-out infinite; }
@@ -104,24 +107,62 @@
         return isToday(d) ? 'Hoy ' + hm : new Intl.DateTimeFormat('es-ES', { day:'2-digit', month:'2-digit' }).format(d) + ' ' + hm;
       };
 
+      // ── Cuenta regresiva / activación por horario ──
+      const LINK_ACTIVE_MIN = 30;  // el enlace se activa 30 min antes del inicio
+      const AUTO_PLAY_MIN = 10;    // se considera "en vivo" (auto-arranque) 10 min antes
+      const koMillis = (m) => (m.kickoff?.seconds ? m.kickoff.seconds * 1000 : null);
+      function formatCountdown(ms) {
+        if (ms <= 0) return '00:00:00';
+        let s = Math.floor(ms / 1000);
+        const d = Math.floor(s / 86400); s -= d * 86400;
+        const h = Math.floor(s / 3600); s -= h * 3600;
+        const mm = Math.floor(s / 60); s -= mm * 60;
+        const p = n => String(n).padStart(2, '0');
+        return (d > 0 ? d + 'd ' : '') + p(h) + ':' + p(mm) + ':' + p(s);
+      }
+      function computePhase(m) {
+        if (m.status === 'finished') return 'finished';
+        if (m.status === 'live') return 'live';
+        const ko = koMillis(m);
+        if (ko == null) return 'active';                          // sin hora: disponible
+        const now = Date.now();
+        if (now >= ko - AUTO_PLAY_MIN * 60000) return 'live';     // auto en vivo
+        if (now >= ko - LINK_ACTIVE_MIN * 60000) return 'active'; // enlace activo
+        return 'locked';                                          // aún bloqueado
+      }
+
       let allMatches = [];
       let currentFilter = 'all';
+      let visibleList = [];
+      let phaseCache = {};
 
       // Al hacer clic en un partido → se abre en el REPRODUCTOR aislado
       window.goMatch = (slug) => { window.location.href = 'reproductor.html?slug=' + encodeURIComponent(slug); };
 
       function matchCard(m) {
-        const live = m.status === 'live';
-        const badge = live
-          ? `<span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-600 text-white text-xs font-black"><span class="w-2 h-2 rounded-full bg-white live-dot"></span>EN VIVO</span>`
-          : `<span class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-bold">🕐 ${esc(timeLabel(m) || 'Próximo')}</span>`;
+        const phase = computePhase(m);
+        const ko = koMillis(m);
+        const cd = ko ? `<span class="cd" id="cd-${m.id}" data-ko="${ko}">${formatCountdown(ko - Date.now())}</span>` : '';
+
+        let badge, button, clickable = true, dim = '';
+        if (phase === 'live') {
+          badge = `<span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-600 text-white text-xs font-black"><span class="w-2 h-2 rounded-full bg-white live-dot"></span>EN VIVO</span>`;
+          button = `<div class="w-full text-center py-2.5 rounded-2xl font-bold text-sm btn-gold text-slate-900">▶️ Ver ahora</div>`;
+        } else if (phase === 'active') {
+          badge = `<span class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-bold">🕐 ${cd || esc(timeLabel(m) || 'Próximo')}</span>`;
+          button = `<div class="w-full text-center py-2.5 rounded-2xl font-bold text-sm btn-gold text-slate-900">▶️ Entrar</div>`;
+        } else { // locked
+          clickable = false; dim = 'locked opacity-60';
+          badge = `<span class="px-2.5 py-1 rounded-full bg-slate-700/60 text-slate-200 text-xs font-bold">🔒 ${cd}</span>`;
+          button = `<div class="w-full text-center py-2.5 rounded-2xl font-bold text-sm bg-slate-800 text-slate-400">🔒 Disponible ${LINK_ACTIVE_MIN} min antes</div>`;
+        }
         const badgeTeam = (name, logo) => `
           <div class="flex flex-col items-center gap-2 flex-1 min-w-0">
             ${logo ? `<img src="${esc(logo)}" class="w-14 h-14 object-contain" alt="" onerror="this.style.display='none'">` : `<div class="w-14 h-14 rounded-full bg-slate-700/80 flex items-center justify-center text-xl">⚽</div>`}
             <span class="font-bold text-sm text-center truncate w-full px-1">${esc(name || '')}</span>
           </div>`;
         return `
-          <div class="match-card bg-slate-900/80 rounded-3xl border border-slate-700/60 card-glow overflow-hidden" onclick="goMatch('${esc(m.slug)}')">
+          <div class="match-card ${dim} bg-slate-900/80 rounded-3xl border border-slate-700/60 card-glow overflow-hidden" ${clickable ? `onclick="goMatch('${esc(m.slug)}')"` : ''}>
             <div class="px-4 pt-4 flex items-center justify-between gap-2">
               <span class="text-xs text-emerald-300/80 font-semibold truncate">${esc(m.competition || '⚽ Partido')}</span>
               ${badge}
@@ -131,25 +172,25 @@
               <span class="text-lg font-black text-slate-500 shrink-0">VS</span>
               ${badgeTeam(m.away, m.awayLogo)}
             </div>
-            <div class="px-4 pb-4">
-              <div class="w-full text-center py-2.5 rounded-2xl font-bold text-sm ${live ? 'btn-gold text-slate-900' : 'bg-slate-800 text-slate-300'}">
-                ${live ? '▶️ Ver ahora' : '🔔 Ver detalle'}
-              </div>
-            </div>
+            <div class="px-4 pb-4">${button}</div>
           </div>`;
       }
 
       function renderGrid() {
         let list = allMatches.slice();
-        if (currentFilter === 'live') list = list.filter(m => m.status === 'live');
-        else if (currentFilter === 'upcoming') list = list.filter(m => m.status === 'upcoming');
-        else list = list.filter(m => m.status !== 'finished');
+        if (currentFilter === 'live') list = list.filter(m => computePhase(m) === 'live');
+        else if (currentFilter === 'upcoming') list = list.filter(m => { const p = computePhase(m); return p === 'active' || p === 'locked'; });
+        else list = list.filter(m => computePhase(m) !== 'finished');
 
         list.sort((a, b) => {
-          const la = a.status === 'live' ? 0 : 1, lb = b.status === 'live' ? 0 : 1;
+          const la = computePhase(a) === 'live' ? 0 : 1, lb = computePhase(b) === 'live' ? 0 : 1;
           if (la !== lb) return la - lb;
-          return (a.kickoff?.seconds || 0) - (b.kickoff?.seconds || 0);
+          return (koMillis(a) || 0) - (koMillis(b) || 0);
         });
+
+        visibleList = list;
+        phaseCache = {};
+        list.forEach(m => phaseCache[m.id] = computePhase(m));
 
         if (list.length === 0) {
           matchesGrid.innerHTML = `<div class="col-span-full text-center text-slate-400 py-24"><div class="text-6xl mb-4 opacity-50">📭</div><p class="text-lg">No hay partidos ${currentFilter === 'live' ? 'en vivo' : currentFilter === 'upcoming' ? 'próximos' : 'disponibles'} por ahora</p></div>`;
@@ -157,6 +198,18 @@
         }
         matchesGrid.innerHTML = list.map(matchCard).join('');
       }
+
+      // Temporizador: actualiza las cuentas regresivas cada segundo.
+      // Solo re-renderiza si un partido cambia de fase (bloqueado→activo→en vivo).
+      setInterval(() => {
+        for (const m of visibleList) {
+          if (computePhase(m) !== phaseCache[m.id]) { renderGrid(); return; }
+        }
+        for (const m of visibleList) {
+          const el = document.getElementById('cd-' + m.id);
+          if (el) el.textContent = formatCountdown(Number(el.dataset.ko) - Date.now());
+        }
+      }, 1000);
 
       filterChips.querySelectorAll('.chip').forEach(chip => chip.addEventListener('click', () => {
         currentFilter = chip.dataset.filter;
