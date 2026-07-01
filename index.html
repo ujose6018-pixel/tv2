@@ -267,10 +267,11 @@
                     </div>
                     <div>
                       <h3 class="text-xl font-bold text-pink-300">Nombre del Enlace</h3>
-                      <p class="text-slate-400 text-sm">Para identificarlo en tu lista</p>
+                      <p class="text-slate-400 text-sm">Este nombre será el final de tu enlace corto</p>
                     </div>
                   </div>
-                  <input id="link-name" type="text" placeholder="Ej: Partido de hoy - Canales 1 y 2" class="w-full bg-slate-900/60 border-2 border-pink-600/50 rounded-2xl px-6 py-5 text-white placeholder-slate-500 text-lg focus:outline-none focus:border-pink-400 focus:ring-4 focus:ring-pink-500/20 transition-all">
+                  <input id="link-name" type="text" placeholder="Ej: mar-vs-arg" class="w-full bg-slate-900/60 border-2 border-pink-600/50 rounded-2xl px-6 py-5 text-white placeholder-slate-500 text-lg focus:outline-none focus:border-pink-400 focus:ring-4 focus:ring-pink-500/20 transition-all">
+                  <p id="slug-preview" class="text-sm text-pink-200/80 mt-1 break-all font-mono min-h-[1.25rem]"></p>
                 </div>
 
                 <!-- Expiración -->
@@ -499,6 +500,7 @@
       const saveStream1 = document.getElementById('save-stream1');
       const saveStream2 = document.getElementById('save-stream2');
       const linkNameInput = document.getElementById('link-name');
+      const slugPreview = document.getElementById('slug-preview');
       const expirationSelect = document.getElementById('expiration-select');
       const btnGenerate = document.getElementById('btn-generate');
       const resultBox = document.getElementById('result-box');
@@ -531,6 +533,23 @@
           day: '2-digit', month: '2-digit', year: '2-digit',
           hour: '2-digit', minute: '2-digit'
         }).format(date);
+      };
+
+      // Convierte un texto en un slug corto y escribible (ej: "Mar vs Arg" -> "mar-vs-arg")
+      const slugify = (str) => (str || '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '') // quitar acentos
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .substring(0, 60);
+
+      // Decodifica sin romperse si el valor tiene un % suelto
+      const safeDecode = (v) => { try { return decodeURIComponent(v); } catch (_) { return v; } };
+
+      // Directorio base del sitio (ej: "/tv2/") — sirve para armar la URL corta
+      const getBaseDir = () => {
+        const p = window.location.pathname;
+        return p.substring(0, p.lastIndexOf('/') + 1);
       };
 
       // Cargar streams desde Firestore en tiempo real
@@ -742,10 +761,12 @@
             editingLinkId = linkId;
             
             // Cargar datos en los campos
-            if (linkData.s1) input1.value = decodeURIComponent(linkData.s1);
-            if (linkData.s2) input2.value = decodeURIComponent(linkData.s2);
+            if (linkData.s1) input1.value = safeDecode(linkData.s1);
+            if (linkData.s2) input2.value = safeDecode(linkData.s2);
             linkNameInput.value = linkData.name || '';
-            
+            updateSlugPreview();
+            checkInputs();
+
             // Calcular y seleccionar la expiración original
             const now = new Date();
             const expiresAt = new Date(linkData.expiresAt.seconds * 1000);
@@ -845,6 +866,15 @@
       input2.addEventListener('input', checkInputs);
       stream1Select.addEventListener('change', checkInputs);
       stream2Select.addEventListener('change', checkInputs);
+
+      // Preview en vivo de la URL corta mientras escribes el nombre
+      const updateSlugPreview = () => {
+        const raw = linkNameInput.value.trim();
+        if (!raw) { slugPreview.textContent = ''; return; }
+        const sl = slugify(raw) || '...';
+        slugPreview.textContent = '🔗 ' + window.location.origin + getBaseDir() + sl;
+      };
+      linkNameInput.addEventListener('input', updateSlugPreview);
 
       // ─── DUAL SOUND SYSTEM ──────────────────────────────────────────────────────
       // localStorage key: stream-${index}-dualsound  ("true"=audio on / "false"=muted)
@@ -1899,6 +1929,7 @@
 
       // 1. Detectar modo (Admin, Visor o Expirado)
       const params = new URLSearchParams(window.location.search);
+      const slug = params.get('slug');
       const s1 = params.get('s1');
       const s2 = params.get('s2');
       const s3 = params.get('s3');
@@ -1906,7 +1937,39 @@
       const s5 = params.get('s5');
       const linkId = params.get('linkId');
 
-      if (linkId) {
+      if (slug) {
+        // Enlace corto tipo /tv2/mar-vs-arg -> buscar el slug en Firestore
+        try {
+          const snap = await getDocs(linksCol);
+          const linkData = snap.docs
+            .map(d => d.data())
+            .filter(d => d.slug === slug)
+            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))[0];
+
+          if (linkData) {
+            // Restaurar la URL limpia en la barra de direcciones
+            try { history.replaceState(null, '', getBaseDir() + slug); } catch (_) {}
+
+            const expiresAt = new Date(linkData.expiresAt.seconds * 1000);
+            if (new Date() > expiresAt) {
+              expiredView.classList.remove('hidden');
+            } else {
+              const streams = [
+                linkData.s1 ? safeDecode(linkData.s1) : null,
+                linkData.s2 ? safeDecode(linkData.s2) : null
+              ].filter(Boolean);
+              loadViewer(streams);
+              _buildModeSelector(streams);
+            }
+          } else {
+            // Slug inexistente -> mostrar vista de expirado/no encontrado
+            expiredView.classList.remove('hidden');
+          }
+        } catch (e) {
+          console.error('Error cargando slug:', e);
+          expiredView.classList.remove('hidden');
+        }
+      } else if (linkId) {
         // Verificar si el enlace ha expirado
         try {
           const docRef = await getDocs(linksCol);
@@ -1975,6 +2038,7 @@
         btnGenerate.classList.add('pulse-glow');
         btnCancelEdit.classList.add('hidden');
         linkNameInput.value = '';
+        slugPreview.textContent = '';
       };
       
       // Botón de cancelar edición
@@ -1982,62 +2046,64 @@
       
       // Generar/Actualizar enlace y guardar
       btnGenerate.addEventListener('click', async () => {
-        const baseUrl = window.location.origin + window.location.pathname;
-        const newParams = new URLSearchParams();
         const s1Value = input1.value.trim();
         const s2Value = input2.value.trim();
-        
-        if (s1Value) newParams.append('s1', encodeURIComponent(s1Value));
-        if (s2Value) newParams.append('s2', encodeURIComponent(s2Value));
-        
-        const fullUrl = `${baseUrl}?${newParams.toString()}`;
-        urlOutput.value = fullUrl;
-        resultBox.classList.remove('hidden');
-        
-        // Guardar en Firestore con expiración
-        const expirationHours = parseInt(expirationSelect.value);
-        const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + expirationHours);
-        
+
         // Usar nombre manual o generar uno automático
         let finalLinkName = linkNameInput.value.trim();
         if (!finalLinkName) {
           const linkNameParts = [];
           if (stream1Select.selectedIndex > 0) linkNameParts.push(stream1Select.options[stream1Select.selectedIndex].text.replace('⚽ ', ''));
           if (stream2Select.selectedIndex > 0) linkNameParts.push(stream2Select.options[stream2Select.selectedIndex].text.replace('⚽ ', ''));
-          finalLinkName = linkNameParts.length > 0 ? linkNameParts.join(' + ') : 'Partido';
+          finalLinkName = linkNameParts.length > 0 ? linkNameParts.join(' vs ') : 'partido';
         }
-        
+
+        // Slug corto y escribible; si queda vacío usar un código aleatorio
+        let slugValue = slugify(finalLinkName);
+        if (!slugValue) slugValue = Math.random().toString(36).slice(2, 7);
+
+        // URL corta: https://.../tv2/mar-vs-arg
+        const shortUrl = window.location.origin + getBaseDir() + slugValue;
+        urlOutput.value = shortUrl;
+        resultBox.classList.remove('hidden');
+
+        // Guardar en Firestore con expiración
+        const expirationHours = parseInt(expirationSelect.value);
+        const expiresAt = new Date();
+        expiresAt.setHours(expiresAt.getHours() + expirationHours);
+
+        const payload = {
+          name: finalLinkName,
+          slug: slugValue,
+          s1: s1Value || null,
+          s2: s2Value || null,
+          url: shortUrl,
+          expiresAt: expiresAt,
+          expirationHours: expirationHours
+        };
+
         try {
-          if (editingLinkId) {
-            // Actualizar documento existente
-            const linkDocRef = doc(db, "generatedLinks", editingLinkId);
-            await updateDoc(linkDocRef, {
-              name: finalLinkName,
-              s1: s1Value || null,
-              s2: s2Value || null,
-              url: fullUrl,
-              expiresAt: expiresAt,
-              expirationHours: expirationHours
-            });
-            alert('Enlace actualizado correctamente!');
-            resetEditMode();
+          // Reutilizar el doc si estamos editando o si el slug ya existe (evita duplicados)
+          let targetId = editingLinkId;
+          if (!targetId) {
+            const snap = await getDocs(linksCol);
+            const existing = snap.docs.find(d => d.data().slug === slugValue);
+            if (existing) targetId = existing.id;
+          }
+
+          if (targetId) {
+            await updateDoc(doc(db, "generatedLinks", targetId), payload);
+            if (editingLinkId) {
+              alert('Enlace actualizado correctamente!');
+              resetEditMode();
+            }
           } else {
-            // Crear nuevo documento
-            await addDoc(linksCol, {
-              name: finalLinkName,
-              s1: s1Value || null,
-              s2: s2Value || null,
-              url: fullUrl,
-              createdAt: new Date(),
-              expiresAt: expiresAt,
-              expirationHours: expirationHours
-            });
+            await addDoc(linksCol, { ...payload, createdAt: new Date() });
           }
         } catch (e) {
           console.error('Error saving link:', e);
         }
-        
+
         btnCopy.classList.remove('bg-green-500');
         btnCopy.classList.add('bg-gradient-to-r', 'from-blue-600', 'to-indigo-600');
         textCopy.textContent = '📋 Copiar';
