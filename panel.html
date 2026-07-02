@@ -86,10 +86,16 @@
                 </div>
               </div>
 
-              <!-- Competición -->
-              <div>
-                <label class="block text-sm font-bold text-slate-300 mb-2">🏆 Competición / liga</label>
-                <input id="m-competition" type="text" placeholder="Ej: Mundial 2026 - Fase de grupos" class="w-full bg-slate-800/60 border border-slate-700 rounded-2xl px-5 py-4 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+              <!-- Competición + Ronda -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-bold text-slate-300 mb-2">🏆 Competición / liga</label>
+                  <input id="m-competition" type="text" placeholder="Ej: Copa Mundial de la FIFA" class="w-full bg-slate-800/60 border border-slate-700 rounded-2xl px-5 py-4 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+                </div>
+                <div>
+                  <label class="block text-sm font-bold text-slate-300 mb-2">🏅 Ronda / fase <span class="text-slate-500 font-normal">(badge amarillo)</span></label>
+                  <input id="m-round" type="text" placeholder="Ej: 16avos de final" class="w-full bg-slate-800/60 border border-slate-700 rounded-2xl px-5 py-4 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+                </div>
               </div>
 
               <!-- Equipos -->
@@ -342,7 +348,7 @@
 
       function resetMatchForm() {
         editingMatchId = null;
-        ['m-competition','m-home','m-home-logo','m-away','m-away-logo','m-kickoff','m-slug'].forEach(id => $(id).value = '');
+        ['m-competition','m-round','m-home','m-home-logo','m-away','m-away-logo','m-kickoff','m-slug'].forEach(id => $(id).value = '');
         $('m-status').value = 'upcoming';
         signalsList.innerHTML = '';
         createSignalRow('Señal 1', '', true);
@@ -372,6 +378,7 @@
           homeLogo: $('m-home-logo').value.trim(),
           awayLogo: $('m-away-logo').value.trim(),
           competition: $('m-competition').value.trim(),
+          round: $('m-round').value.trim(),
           title: [home, away].filter(Boolean).join(' vs '),
           kickoff,
           status: $('m-status').value,
@@ -436,6 +443,7 @@
           const m = d.data();
           editingMatchId = id;
           $('m-competition').value = m.competition || '';
+          $('m-round').value = m.round || '';
           $('m-home').value = m.home || '';
           $('m-home-logo').value = m.homeLogo || '';
           $('m-away').value = m.away || '';

@@ -16,7 +16,6 @@
     })();
   </script>
 
-  <script src="https://cdn.tailwindcss.com"></script>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
     import { getFirestore } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
@@ -31,61 +30,164 @@
     const app = initializeApp(firebaseConfig);
     getFirestore(app);
   </script>
+
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
-    body { background: #0a0f1e; color: #fff; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    body {
+      color: #fff; min-height: 100vh;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      background: radial-gradient(1200px 600px at 50% -8%, #1b2a8f 0%, #0c1560 42%, #060a2e 100%) fixed, #060a2e;
+    }
     .hidden { display: none !important; }
-    .gradient-bg { background: linear-gradient(135deg, #020617 0%, #0f172a 50%, #1e293b 100%); }
-    .btn-gold { background: linear-gradient(135deg,#f59e0b 0%,#fbbf24 50%,#fcd34d 100%); transition: transform .2s, box-shadow .2s; }
-    .btn-gold:hover { transform: translateY(-2px); box-shadow:0 12px 30px rgba(245,158,11,0.5); }
-    .card-glow { box-shadow: 0 16px 40px rgba(0,0,0,0.45); }
-    .match-card { transition: transform .2s, box-shadow .2s, border-color .2s; cursor: pointer; }
-    .match-card:hover { transform: translateY(-4px); border-color: rgba(16,185,129,0.6); }
-    .match-card.locked { cursor: default; }
-    .match-card.locked:hover { transform: none; border-color: rgba(71,85,105,0.55); }
-    .cd { font-variant-numeric: tabular-nums; }
-    .chip { transition: background .2s, color .2s; }
-    @keyframes live-blink { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
-    .live-dot { animation: live-blink 1.1s ease-in-out infinite; }
-    ::-webkit-scrollbar { width: 8px; }
-    ::-webkit-scrollbar-track { background: rgba(15,23,42,0.5); }
-    ::-webkit-scrollbar-thumb { background: #10b981; border-radius: 10px; }
+    a { text-decoration: none; color: inherit; }
+
+    /* ── Navbar ── */
+    .navbar { position: sticky; top: 0; z-index: 40; background: linear-gradient(180deg, #1e2ee6 0%, #1523c0 100%); box-shadow: 0 4px 20px rgba(0,0,0,0.35); }
+    .navbar-inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 20px; padding: 0 18px; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 900; font-size: 20px; letter-spacing: .5px; }
+    .brand img { width: 34px; height: 34px; object-fit: contain; background: #fff; border-radius: 8px; padding: 3px; }
+    .brand .b1 { color: #fff; } .brand .b2 { color: #ffd21e; }
+    .nav-links { display: flex; gap: 6px; margin-left: 14px; flex: 1; }
+    .nav-link { padding: 20px 14px; font-weight: 800; font-size: 14px; letter-spacing: .5px; color: #c7cffc; cursor: pointer; border: none; background: none; border-bottom: 3px solid transparent; }
+    .nav-link:hover { color: #fff; }
+    .nav-link.active { color: #fff; border-bottom-color: #ffd21e; }
+    .nav-icons { display: flex; align-items: center; gap: 4px; }
+    .icon-btn { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: transparent; border: none; color: #dfe4ff; cursor: pointer; }
+    .icon-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+    .icon-btn svg { width: 20px; height: 20px; }
+    .search-box { display: none; }
+    .search-box.open { display: flex; }
+    .search-box input { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: #fff; border-radius: 999px; padding: 8px 14px; outline: none; width: 180px; }
+    .search-box input::placeholder { color: #c7cffc; }
+
+    /* ── Hero ── */
+    .hero { max-width: 1200px; margin: 18px auto 0; padding: 0 18px; }
+    .hero-inner {
+      position: relative; overflow: hidden; border-radius: 18px; padding: 26px 28px;
+      background: linear-gradient(120deg, #16267e 0%, #21379e 60%, #16267e 100%);
+      background-image:
+        repeating-linear-gradient(120deg, rgba(255,255,255,0.05) 0 2px, transparent 2px 24px),
+        radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1.6px),
+        linear-gradient(120deg, #16267e 0%, #21379e 60%, #16267e 100%);
+      background-size: auto, 24px 24px, auto;
+      display: flex; align-items: center; gap: 20px;
+    }
+    .hero-inner img { width: 74px; height: 74px; object-fit: contain; background: #fff; border-radius: 14px; padding: 6px; }
+    .hero h2 { margin: 0; font-size: 26px; font-weight: 900; }
+    .hero p { margin: 4px 0 0; color: #bcc7f7; font-weight: 600; }
+
+    /* ── Sección ── */
+    .section { max-width: 1200px; margin: 26px auto 0; padding: 0 18px; }
+    .section-title { font-size: 22px; font-weight: 900; margin: 0 0 14px; }
+    .scroll-wrap { position: relative; }
+    .scroller { display: flex; gap: 16px; overflow-x: auto; scroll-behavior: smooth; padding: 4px 2px 14px; scrollbar-width: thin; }
+    .scroller::-webkit-scrollbar { height: 8px; }
+    .scroller::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 10px; }
+    .scroll-arrow { position: absolute; top: 42%; transform: translateY(-50%); z-index: 6; width: 38px; height: 38px; border-radius: 10px; border: none; cursor: pointer; background: rgba(10,16,60,0.85); color: #fff; font-size: 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+    .scroll-arrow:hover { background: #1e2ee6; }
+    .scroll-arrow.left { left: -6px; } .scroll-arrow.right { right: -6px; }
+
+    /* ── Tarjeta de evento (estilo Tigo) ── */
+    .event-card { flex: 0 0 300px; max-width: 300px; cursor: pointer; transition: transform .2s; }
+    .event-card:hover { transform: translateY(-4px); }
+    .event-card.locked { cursor: default; opacity: 0.72; }
+    .event-card.locked:hover { transform: none; }
+    .event-top {
+      position: relative; border-radius: 16px 16px 0 0; padding: 16px 14px 18px; overflow: hidden;
+      background-color: #163092;
+      background-image:
+        repeating-linear-gradient(120deg, rgba(255,255,255,0.06) 0 2px, transparent 2px 26px),
+        radial-gradient(rgba(255,255,255,0.11) 1px, transparent 1.5px);
+      background-size: auto, 22px 22px;
+    }
+    .comp-title { text-align: center; color: #fff; font-weight: 800; font-style: italic; font-size: 15px; text-shadow: 0 2px 6px rgba(0,0,0,0.4); margin-bottom: 12px; min-height: 20px; line-height: 1.1; }
+    .crest-panel { position: relative; background: rgba(255,255,255,0.95); border-radius: 12px; padding: 20px 10px 12px; margin-top: 8px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.05); }
+    .round-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); white-space: nowrap; background: linear-gradient(180deg,#ffd21e,#f5a800); color: #14267a; font-weight: 900; font-size: 11px; letter-spacing: .4px; padding: 5px 14px; border-radius: 999px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); text-transform: uppercase; }
+    .round-badge.live { background: linear-gradient(180deg,#ff3b46,#d61120); color: #fff; }
+    .crests { display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .crest { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+    .crest img { width: 62px; height: 62px; border-radius: 50%; object-fit: cover; background: #eef; box-shadow: 0 3px 8px rgba(0,0,0,0.25); }
+    .crest .noimg { width: 62px; height: 62px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; background: #dbe3ff; }
+    .crest .code { color: #10225f; font-weight: 900; font-size: 16px; letter-spacing: .5px; }
+    .vs { color: #10225f; font-weight: 900; font-size: 18px; }
+    .event-meta { background: rgba(9,14,52,0.72); border-radius: 0 0 16px 16px; padding: 12px 14px; }
+    .event-name { font-weight: 800; font-size: 15px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .event-time { color: #9fb0e6; font-size: 12.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+    .event-time .cd { color: #ffd21e; font-weight: 700; }
+    .event-time .live { color: #ff5964; font-weight: 800; }
+    @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ff3b46; margin-right: 4px; animation: blink 1.1s infinite; }
+
+    .empty { text-align: center; color: #9fb0e6; padding: 60px 0; width: 100%; }
+    footer { max-width: 1200px; margin: 40px auto 0; padding: 24px 18px; color: #6b78ba; font-size: 12px; text-align: center; }
+
+    /* ── Responsive (móvil / Smart TV angosta) ── */
+    @media (max-width: 640px) {
+      .navbar-inner { gap: 4px; padding: 0 8px; }
+      .brand { font-size: 15px; gap: 6px; }
+      .brand img { width: 26px; height: 26px; }
+      .nav-links { margin-left: 2px; gap: 0; }
+      .nav-link { padding: 20px 7px; font-size: 11.5px; letter-spacing: 0; }
+      .icon-btn { width: 34px; height: 34px; }
+      .search-box input { width: 116px; }
+      .hero-inner { padding: 18px; gap: 14px; }
+      .hero-inner img { width: 56px; height: 56px; }
+      .hero h2 { font-size: 19px; }
+      .section-title { font-size: 19px; }
+      .event-card { flex-basis: 270px; max-width: 270px; }
+    }
   </style>
 </head>
-<body class="gradient-bg text-white min-h-screen w-full font-sans">
+<body>
 
-  <div id="home-view" class="min-h-screen">
-    <header class="sticky top-0 z-30 bg-slate-950/90 border-b border-emerald-500/20">
-      <div class="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
-        <div class="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-xl p-1">
-          <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/2026_FIFA_World_Cup_emblem.svg/1920px-2026_FIFA_World_Cup_emblem.svg.png" alt="Mundial 2026" class="w-full h-full object-contain">
-        </div>
-        <div>
-          <h1 class="text-xl sm:text-2xl font-black bg-gradient-to-r from-yellow-300 via-orange-400 to-yellow-500 bg-clip-text text-transparent leading-tight">TV MUNDIAL 2026</h1>
-          <p class="text-emerald-300/80 text-xs font-semibold">⚽ Fútbol en vivo</p>
-        </div>
+  <!-- ── Navbar ── -->
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <div class="brand">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/2026_FIFA_World_Cup_emblem.svg/1920px-2026_FIFA_World_Cup_emblem.svg.png" alt="">
+        <span><span class="b1">MUNDIAL</span> <span class="b2">2026</span></span>
       </div>
-    </header>
+      <div class="nav-links">
+        <button class="nav-link active" data-filter="all">INICIO</button>
+        <button class="nav-link" data-filter="live">EN VIVO</button>
+        <button class="nav-link" data-filter="upcoming">PRÓXIMOS</button>
+      </div>
+      <div class="nav-icons">
+        <div class="search-box" id="search-box">
+          <input id="search-input" type="text" placeholder="Buscar equipo…">
+        </div>
+        <button class="icon-btn" id="search-btn" title="Buscar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+        </button>
+      </div>
+    </div>
+  </nav>
 
-    <main class="max-w-6xl mx-auto px-4 py-6">
-      <div id="filter-chips" class="flex gap-2 mb-6 overflow-x-auto pb-1">
-        <button data-filter="all" class="chip active shrink-0 px-5 py-2.5 rounded-full font-bold text-sm bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg">📺 Todos</button>
-        <button data-filter="live" class="chip shrink-0 px-5 py-2.5 rounded-full font-bold text-sm bg-slate-800/70 text-slate-300 hover:bg-slate-700">🔴 En vivo</button>
-        <button data-filter="upcoming" class="chip shrink-0 px-5 py-2.5 rounded-full font-bold text-sm bg-slate-800/70 text-slate-300 hover:bg-slate-700">🕐 Próximos</button>
+  <!-- ── Hero ── -->
+  <div class="hero">
+    <div class="hero-inner">
+      <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/2026_FIFA_World_Cup_emblem.svg/1920px-2026_FIFA_World_Cup_emblem.svg.png" alt="">
+      <div>
+        <h2>Copa Mundial de la FIFA 2026™</h2>
+        <p>Todos los partidos en vivo, en un solo lugar ⚽</p>
       </div>
-      <div id="matches-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div class="col-span-full text-center text-slate-400 py-24">
-          <div class="text-6xl mb-4 opacity-50">📡</div>
-          <p class="text-lg">Cargando partidos…</p>
-        </div>
-      </div>
-    </main>
-
-    <footer class="max-w-6xl mx-auto px-4 py-8 text-center text-slate-500 text-xs">
-      ⚽ TV Mundial 2026 · Transmisiones en vivo
-    </footer>
+    </div>
   </div>
+
+  <!-- ── Sección de eventos ── -->
+  <div class="section">
+    <h3 class="section-title" id="section-title">Próximos eventos</h3>
+    <div class="scroll-wrap">
+      <button class="scroll-arrow left" id="arrow-left">‹</button>
+      <div class="scroller" id="scroller">
+        <div class="empty">Cargando partidos…</div>
+      </div>
+      <button class="scroll-arrow right" id="arrow-right">›</button>
+    </div>
+  </div>
+
+  <footer>⚽ MUNDIAL 2026 · Transmisiones en vivo</footer>
 
   <script type="module">
     import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
@@ -95,16 +197,16 @@
       const matchesCol = collection(db, "matches");
 
       const $ = id => document.getElementById(id);
-      const matchesGrid = $('matches-grid');
-      const filterChips = $('filter-chips');
+      const scroller = $('scroller');
+      const sectionTitle = $('section-title');
 
       const esc = (s) => (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-      const isToday = (d) => { const n = new Date(); return d.getDate()===n.getDate() && d.getMonth()===n.getMonth() && d.getFullYear()===n.getFullYear(); };
-      const timeLabel = (m) => {
+      const abbr = (name) => ((name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase() || '—');
+      const dt = (m) => {
         if (!m.kickoff?.seconds) return '';
         const d = new Date(m.kickoff.seconds * 1000);
-        const hm = new Intl.DateTimeFormat('es-ES', { hour:'2-digit', minute:'2-digit' }).format(d);
-        return isToday(d) ? 'Hoy ' + hm : new Intl.DateTimeFormat('es-ES', { day:'2-digit', month:'2-digit' }).format(d) + ' ' + hm;
+        const p = n => String(n).padStart(2, '0');
+        return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
       };
 
       // ── Cuenta regresiva / activación por horario ──
@@ -124,60 +226,75 @@
         if (m.status === 'finished') return 'finished';
         if (m.status === 'live') return 'live';
         const ko = koMillis(m);
-        if (ko == null) return 'active';                          // sin hora: disponible
+        if (ko == null) return 'active';
         const now = Date.now();
-        if (now >= ko - AUTO_PLAY_MIN * 60000) return 'live';     // auto en vivo
-        if (now >= ko - LINK_ACTIVE_MIN * 60000) return 'active'; // enlace activo
-        return 'locked';                                          // aún bloqueado
+        if (now >= ko - AUTO_PLAY_MIN * 60000) return 'live';
+        if (now >= ko - LINK_ACTIVE_MIN * 60000) return 'active';
+        return 'locked';
       }
 
       let allMatches = [];
       let currentFilter = 'all';
+      let searchQuery = '';
       let visibleList = [];
       let phaseCache = {};
 
-      // Al hacer clic en un partido → se abre en el REPRODUCTOR aislado
       window.goMatch = (slug) => { window.location.href = 'reproductor.html?slug=' + encodeURIComponent(slug); };
+
+      function crest(name, logo) {
+        return `<div class="crest">
+          ${logo ? `<img src="${esc(logo)}" alt="" onerror="this.outerHTML='<div class=&quot;noimg&quot;>⚽</div>'">` : `<div class="noimg">⚽</div>`}
+          <span class="code">${esc(abbr(name))}</span>
+        </div>`;
+      }
 
       function matchCard(m) {
         const phase = computePhase(m);
         const ko = koMillis(m);
-        const cd = ko ? `<span class="cd" id="cd-${m.id}" data-ko="${ko}">${formatCountdown(ko - Date.now())}</span>` : '';
+        const now = Date.now();
 
-        let badge, button, clickable = true, dim = '';
+        let badge = '';
+        if (phase === 'live') badge = `<div class="round-badge live">● EN VIVO</div>`;
+        else if (m.round) badge = `<div class="round-badge">${esc(m.round)}</div>`;
+
+        let timeLine;
         if (phase === 'live') {
-          badge = `<span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-600 text-white text-xs font-black"><span class="w-2 h-2 rounded-full bg-white live-dot"></span>EN VIVO</span>`;
-          button = `<div class="w-full text-center py-2.5 rounded-2xl font-bold text-sm btn-gold text-slate-900">▶️ Ver ahora</div>`;
-        } else if (phase === 'active') {
-          badge = `<span class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-bold">🕐 ${cd || esc(timeLabel(m) || 'Próximo')}</span>`;
-          button = `<div class="w-full text-center py-2.5 rounded-2xl font-bold text-sm btn-gold text-slate-900">▶️ Entrar</div>`;
-        } else { // locked
-          clickable = false; dim = 'locked opacity-60';
-          badge = `<span class="px-2.5 py-1 rounded-full bg-slate-700/60 text-slate-200 text-xs font-bold">🔒 ${cd}</span>`;
-          button = `<div class="w-full text-center py-2.5 rounded-2xl font-bold text-sm bg-slate-800 text-slate-400">🔒 Disponible ${LINK_ACTIVE_MIN} min antes</div>`;
+          timeLine = `<span class="live"><span class="dot"></span>EN VIVO AHORA</span>`;
+        } else if (phase === 'locked') {
+          timeLine = `${esc(dt(m))} · 🔒 <span class="cd" id="cd-${m.id}" data-ko="${ko}">${formatCountdown(ko - now)}</span>`;
+        } else {
+          timeLine = `${esc(dt(m))}${ko ? ` · ⏱ <span class="cd" id="cd-${m.id}" data-ko="${ko}">${formatCountdown(ko - now)}</span>` : ''}`;
         }
-        const badgeTeam = (name, logo) => `
-          <div class="flex flex-col items-center gap-2 flex-1 min-w-0">
-            ${logo ? `<img src="${esc(logo)}" class="w-14 h-14 object-contain" alt="" onerror="this.style.display='none'">` : `<div class="w-14 h-14 rounded-full bg-slate-700/80 flex items-center justify-center text-xl">⚽</div>`}
-            <span class="font-bold text-sm text-center truncate w-full px-1">${esc(name || '')}</span>
-          </div>`;
+
+        const clickable = phase !== 'locked';
+        const name = [m.home, m.away].filter(Boolean).join(' vs. ') || (m.title || 'Partido');
         return `
-          <div class="match-card ${dim} bg-slate-900/80 rounded-3xl border border-slate-700/60 card-glow overflow-hidden" ${clickable ? `onclick="goMatch('${esc(m.slug)}')"` : ''}>
-            <div class="px-4 pt-4 flex items-center justify-between gap-2">
-              <span class="text-xs text-emerald-300/80 font-semibold truncate">${esc(m.competition || '⚽ Partido')}</span>
-              ${badge}
+          <div class="event-card ${clickable ? '' : 'locked'}" ${clickable ? `onclick="goMatch('${esc(m.slug)}')"` : ''}>
+            <div class="event-top">
+              <div class="comp-title">${esc(m.competition || 'COPA MUNDIAL DE LA FIFA')}</div>
+              <div class="crest-panel">
+                ${badge}
+                <div class="crests">
+                  ${crest(m.home, m.homeLogo)}
+                  <span class="vs">VS</span>
+                  ${crest(m.away, m.awayLogo)}
+                </div>
+              </div>
             </div>
-            <div class="p-5 flex items-center gap-2">
-              ${badgeTeam(m.home, m.homeLogo)}
-              <span class="text-lg font-black text-slate-500 shrink-0">VS</span>
-              ${badgeTeam(m.away, m.awayLogo)}
+            <div class="event-meta">
+              <p class="event-name">${esc(name)}</p>
+              <div class="event-time">${timeLine}</div>
             </div>
-            <div class="px-4 pb-4">${button}</div>
           </div>`;
       }
 
+      function passesSearch(m) {
+        if (!searchQuery) return true;
+        return `${m.home || ''} ${m.away || ''} ${m.competition || ''} ${m.title || ''}`.toLowerCase().includes(searchQuery);
+      }
+
       function renderGrid() {
-        let list = allMatches.slice();
+        let list = allMatches.filter(passesSearch);
         if (currentFilter === 'live') list = list.filter(m => computePhase(m) === 'live');
         else if (currentFilter === 'upcoming') list = list.filter(m => { const p = computePhase(m); return p === 'active' || p === 'locked'; });
         else list = list.filter(m => computePhase(m) !== 'finished');
@@ -192,15 +309,41 @@
         phaseCache = {};
         list.forEach(m => phaseCache[m.id] = computePhase(m));
 
-        if (list.length === 0) {
-          matchesGrid.innerHTML = `<div class="col-span-full text-center text-slate-400 py-24"><div class="text-6xl mb-4 opacity-50">📭</div><p class="text-lg">No hay partidos ${currentFilter === 'live' ? 'en vivo' : currentFilter === 'upcoming' ? 'próximos' : 'disponibles'} por ahora</p></div>`;
-          return;
-        }
-        matchesGrid.innerHTML = list.map(matchCard).join('');
+        sectionTitle.textContent = currentFilter === 'live' ? '🔴 En vivo' : currentFilter === 'upcoming' ? 'Próximos eventos' : 'Eventos';
+
+        scroller.innerHTML = list.length === 0
+          ? `<div class="empty">📭 No hay partidos ${currentFilter === 'live' ? 'en vivo' : currentFilter === 'upcoming' ? 'próximos' : 'disponibles'} por ahora</div>`
+          : list.map(matchCard).join('');
       }
 
-      // Temporizador: actualiza las cuentas regresivas cada segundo.
-      // Solo re-renderiza si un partido cambia de fase (bloqueado→activo→en vivo).
+      // Navegación (filtros)
+      document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', () => {
+        document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+        link.classList.add('active');
+        currentFilter = link.dataset.filter;
+        renderGrid();
+      }));
+
+      // Buscador
+      $('search-btn').addEventListener('click', () => {
+        const box = $('search-box');
+        box.classList.toggle('open');
+        if (box.classList.contains('open')) $('search-input').focus();
+        else { $('search-input').value = ''; searchQuery = ''; renderGrid(); }
+      });
+      $('search-input').addEventListener('input', (e) => { searchQuery = e.target.value.trim().toLowerCase(); renderGrid(); });
+
+      // Flechas de scroll
+      $('arrow-left').addEventListener('click', () => scroller.scrollBy({ left: -330, behavior: 'smooth' }));
+      $('arrow-right').addEventListener('click', () => scroller.scrollBy({ left: 330, behavior: 'smooth' }));
+
+      // Datos en tiempo real
+      onSnapshot(matchesCol, (snap) => {
+        allMatches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderGrid();
+      });
+
+      // Temporizador: actualiza cuentas regresivas cada segundo; re-renderiza al cambiar de fase
       setInterval(() => {
         for (const m of visibleList) {
           if (computePhase(m) !== phaseCache[m.id]) { renderGrid(); return; }
@@ -210,26 +353,6 @@
           if (el) el.textContent = formatCountdown(Number(el.dataset.ko) - Date.now());
         }
       }, 1000);
-
-      filterChips.querySelectorAll('.chip').forEach(chip => chip.addEventListener('click', () => {
-        currentFilter = chip.dataset.filter;
-        filterChips.querySelectorAll('.chip').forEach(c => {
-          const on = c === chip;
-          c.classList.toggle('bg-gradient-to-r', on);
-          c.classList.toggle('from-emerald-600', on);
-          c.classList.toggle('to-teal-600', on);
-          c.classList.toggle('text-white', on);
-          c.classList.toggle('shadow-lg', on);
-          c.classList.toggle('bg-slate-800/70', !on);
-          c.classList.toggle('text-slate-300', !on);
-        });
-        renderGrid();
-      }));
-
-      onSnapshot(matchesCol, (snap) => {
-        allMatches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        renderGrid();
-      });
     });
   </script>
 </body>
